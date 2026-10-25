@@ -131,12 +131,27 @@ export function parseMidi(arrayBuffer) {
   const tickToSec = makeTickToSec(tempoMap, tpq);
   for (const e of all) e.sec = tickToSec(e.tick);
 
-  // track names / song name
+  // track names / song name — many Chinese MIDI files store the name in
+  // GBK/GB2312; UTF-8-decode strictly first, fall back to GBK, then latin-1.
+  const decoders = [
+    () => new TextDecoder('utf-8', { fatal: true }),
+    () => new TextDecoder('gbk'),
+    () => new TextDecoder('latin1'),
+  ];
+  function decodeName(data) {
+    for (const mk of decoders) {
+      try {
+        const s = mk().decode(data).replace(/\u0000/g, '').trim();
+        if (s && !/[\uFFFD]/.test(s)) return s;
+      } catch (e) { /* try next encoding */ }
+    }
+    return '';
+  }
   let name = '';
   for (const ev of tracks) {
     for (const e of ev) {
       if (e.type === 'meta' && (e.meta === 0x03 || e.meta === 0x01) && e.data.length) {
-        name = new TextDecoder('utf-8').decode(e.data).replace(/\u0000/g, '').trim();
+        name = decodeName(e.data);
         if (name) break;
       }
     }
@@ -144,7 +159,9 @@ export function parseMidi(arrayBuffer) {
   }
 
   all.sort((a, b) => a.tick - b.tick || (a.sec - b.sec));
-  const duration = all.length ? tickToSec(Math.max(...all.map(e => e.tick))) : 0;
+  let maxTick = 0;
+  for (const e of all) if (e.tick > maxTick) maxTick = e.tick;
+  const duration = all.length ? tickToSec(maxTick) : 0;
 
   return { format, ntrks, division: tpq, name, events: all, duration, tickToSec, tempoMap };
 }
@@ -156,7 +173,7 @@ function makeTickToSec(tempoMap, tpq) {
   for (let i = 0; i < tempoMap.length; i++) {
     const tm = tempoMap[i];
     if (tm.tick < tick) continue;
-    points.push({ tick: tm.tick, sec });
+    points.push({ tick: tm.tick, sec, tempo: tm.tempo });
     // advance to next tempo
     if (i + 1 < tempoMap.length) {
       const dt = tempoMap[i + 1].tick - tm.tick;
@@ -165,18 +182,19 @@ function makeTickToSec(tempoMap, tpq) {
     tick = tm.tick;
   }
   const lastTempo = tempoMap[tempoMap.length - 1].tempo;
-  const lastTick = points[points.length - 1].tick;
+  const pts = points;
+  // binary search over the precomputed tempo points (fast for huge MIDI files)
   return (t) => {
-    if (t <= points[0].tick) return points[0].sec;
-    for (let i = points.length - 1; i >= 0; i--) {
-      if (t >= points[i].tick) {
-        if (i === points.length - 1) {
-          return points[i].sec + (t - points[i].tick) * lastTempo / 1e6 / tpq;
-        }
-        const segTempo = tempoMap[i].tempo;
-        return points[i].sec + (t - points[i].tick) * segTempo / 1e6 / tpq;
-      }
+    if (t <= pts[0].tick) return pts[0].sec;
+    let lo = 0, hi = pts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (pts[mid].tick <= t) lo = mid; else hi = mid - 1;
     }
-    return 0;
+    const p = pts[lo];
+    if (lo === pts.length - 1) {
+      return p.sec + (t - p.tick) * lastTempo / 1e6 / tpq;
+    }
+    return p.sec + (t - p.tick) * p.tempo / 1e6 / tpq;
   };
 }
