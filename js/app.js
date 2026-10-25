@@ -188,7 +188,14 @@ async function init() {
   $('dotSf').className = engine.mode === 'pack' ? 'dot on' : 'dot warn';
   _checkLoading();
 
-  scene.loadPianoModel('assets/piano.glb', (p) => {
+  // Model source: GitHub Pages serves from the Release asset (repo file is
+  // 55 MB > Contents API limit, so it is hosted as a Release attachment);
+  // local/dev loads the packaged asset directly.
+  const onGitHubPages = location.hostname.indexOf('github.io') >= 0;
+  const glbUrl = onGitHubPages
+    ? 'https://github.com/Grovlfe/piano3d/releases/download/v1.0/piano.glb'
+    : 'assets/piano.glb';
+  scene.loadPianoModel(glbUrl, (p) => {
     $('loadbarFill').style.width = Math.round(p * 100) + '%';
     $('loadingSub').textContent = '正在加载 3D 模型 ' + Math.round(p * 100) + '%…';
   });
