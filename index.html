@@ -226,6 +226,24 @@
     </div>
   </div>
   <div class="panel sec">
+    <h3>光影预设 Light Preset</h3>
+    <div class="chips" style="margin-bottom:10px">
+      <button class="chip" id="lp-default" data-preset="default">默认</button>
+      <button class="chip" id="lp-ref" data-preset="ref">参考图·垂直光</button>
+      <button class="chip" id="lp-stage" data-preset="stage">舞台聚光</button>
+      <button class="chip" id="lp-cool" data-preset="cool">全局冷调</button>
+    </div>
+    <div class="row"><span class="lbl">背景幕布</span><select id="backdrop" style="width:140px">
+      <option value="07080b">纯黑幕布</option>
+      <option value="232e40">深蓝灰</option>
+      <option value="14171c">深灰幕布</option>
+      <option value="0c0a08">暖黑幕布</option>
+    </select></div>
+    <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
+      参考图·垂直光：顶部垂直主光 + 全局光照 + 强阴影对比 + 黑色幕布，接近演奏现场光线。预设可一键切换，也可再用上方滑块细调。
+    </div>
+  </div>
+  <div class="panel sec">
     <h3>视角 View</h3>
     <div class="row"><span class="lbl">水平</span><input type="range" id="camAz" min="0" max="360" value="0" style="width:150px"></div>
     <div class="row"><span class="lbl">仰角</span><input type="range" id="camEl" min="-20" max="70" value="22" style="width:150px"></div>
