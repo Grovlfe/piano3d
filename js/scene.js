@@ -187,7 +187,11 @@ export class PianoScene {
 
   loadPianoModel(url, onProgress) {
     const loader = new GLTFLoader();
-    loader.load(url, (gltf) => {
+    // GitHub Pages: repo cannot hold the 55 MB GLB (Contents API limit),
+    // so the model is stored as 12 same-origin chunks and merged in-browser.
+    // Same-origin fetch avoids any CORS issue on the live site.
+    const onGitHubPages = location.hostname.indexOf('github.io') >= 0;
+    const finish = (gltf) => {
       try {
         this._processModel(gltf.scene);
         this._alignModel();
@@ -202,14 +206,43 @@ export class PianoScene {
         if (this.cb.onModelReady) this.cb.onModelReady();
         if (this.cb.onWarn) this.cb.onWarn('模型解析失败，已使用内置简易钢琴模型。');
       }
-    }, (ev) => {
-      if (onProgress) onProgress(ev.loaded / ev.total);
-    }, (err) => {
+    };
+    const onErr = (err) => {
       console.error('model load error', err);
       this._buildFallbackPiano();
       if (this.cb.onModelReady) this.cb.onModelReady();
       if (this.cb.onWarn) this.cb.onWarn('模型加载失败，已使用内置简易钢琴模型。');
-    });
+    };
+    if (onGitHubPages) {
+      const CHUNKS = 12;
+      Promise.all(
+        Array.from({ length: CHUNKS }, (_, i) =>
+          fetch('assets/piano.glb.' + String(i).padStart(2, '0'))
+            .then((r) => {
+              if (!r.ok) throw new Error('chunk ' + i + ' http ' + r.status);
+              return r.arrayBuffer();
+            })
+            .then((b) => {
+              if (onProgress) onProgress((i + 1) / CHUNKS);
+              return b;
+            })
+        )
+      ).then((bufs) => {
+        const total = bufs.reduce((s, b) => s + b.byteLength, 0);
+        const merged = new Uint8Array(total);
+        let off = 0;
+        for (const b of bufs) {
+          merged.set(new Uint8Array(b), off);
+          off += b.byteLength;
+        }
+        const objUrl = URL.createObjectURL(new Blob([merged], { type: 'model/gltf-binary' }));
+        loader.load(objUrl, finish, undefined, onErr);
+      }).catch(onErr);
+    } else {
+      loader.load(url, finish, (ev) => {
+        if (onProgress) onProgress(ev.loaded / ev.total);
+      }, onErr);
+    }
   }
 
   // ---------- model processing ----------
