@@ -4,6 +4,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=51';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=51';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=51';
 import { Reflector } from 'three/addons/objects/Reflector.js?v=56';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js?v=1';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js?v=1';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js?v=1';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js?v=1';
 
 const WHITE_NOTES = new Set([0, 2, 4, 5, 7, 9, 11]);
 const NOTE0 = 21, NOTE1 = 108;
@@ -92,6 +96,19 @@ export class PianoScene {
       this.scene.environment = envTex;
       pmrem.dispose();
     } catch (e) { /* env optional */ }
+
+    // post-processing: bloom (default OFF for perf; user slider enables it)
+    try {
+      this.composer = new EffectComposer(renderer);
+      this.composer.addPass(new RenderPass(this.scene, this.camera));
+      this.bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0, 0.55, 0.82);
+      this.bloomPass.enabled = false;
+      this.composer.addPass(this.bloomPass);
+      this.composer.addPass(new OutputPass());
+      this.composer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      this._bloom = 0;
+      this._useComposer = false;
+    } catch (e) { /* composer optional (very old GL) */ }
 
     // floor
     this._floorReflect = false; // floor mirror bonus pass off by default (perf)
@@ -360,12 +377,42 @@ export class PianoScene {
     return 3 + 7 * o + [0, 1, 3, 4, 5][p];
   }
 
+  _keyTexture(white) {
+    // procedural micro-texture for key caps: ivory grain on white keys,
+    // fine resin/wood grain on black keys. Only affects shading (bump) —
+    // the key colour stays exactly the model's colour (pressing never changes
+    // appearance).
+    try {
+      const cv = document.createElement('canvas');
+      cv.width = 256; cv.height = 256;
+      const c = cv.getContext('2d');
+      c.fillStyle = white ? '#ffffff' : '#141414';
+      c.fillRect(0, 0, 256, 256);
+      const n = white ? 3400 : 2200;
+      for (let i = 0; i < n; i++) {
+        const x = Math.random() * 256, y = Math.random() * 256;
+        const v = Math.random();
+        if (white) {
+          c.fillStyle = v > 0.5 ? 'rgba(228,224,214,' + (v * 0.09) + ')' : 'rgba(255,255,255,' + (v * 0.08) + ')';
+        } else {
+          c.fillStyle = v > 0.5 ? 'rgba(255,255,255,' + (v * 0.03) + ')' : 'rgba(0,0,0,' + (v * 0.05) + ')';
+        }
+        c.fillRect(x, y, 1, 1);
+      }
+      const t = new THREE.CanvasTexture(cv);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(1, 1);
+      return t;
+    } catch (e) { return null; }
+  }
+
   _glossMaterial(srcMat, opt) {
     const c = (srcMat && srcMat.color) ? srcMat.color.clone() : new THREE.Color(0xf5f3ee);
     return new THREE.MeshPhysicalMaterial({
       color: c, roughness: opt.r, metalness: 0.0,
       clearcoat: opt.cc, clearcoatRoughness: opt.ccr,
       envMapIntensity: opt.env, side: THREE.DoubleSide,
+      bumpMap: opt.bump || null, bumpScale: opt.bumpS || 0.4,
     });
   }
 
@@ -499,11 +546,13 @@ export class PianoScene {
     const wq = group.getWorldQuaternion(new THREE.Quaternion()).invert();
     this._downVec.set(0, -1, 0).applyQuaternion(wq).normalize();
 
-    // White keys: glossy ivory via PBR clearcoat (no planar mirror — pressing
-    // must NEVER change the key colour/appearance). Black keys: matte, no
-    // reflection of other objects (user requirement).
-    const whiteMat = this._glossMaterial(white.material, { r: 0.14, cc: 1.0, ccr: 0.06, env: 1.0 });
-    const blackMat = this._glossMaterial(black ? black.material : null, { r: 0.58, cc: 0.05, ccr: 0.4, env: 0.15 });
+    // White keys: glossy lacquered ivory via PBR clearcoat + fine grain bump
+    // (pressing must NEVER change colour/appearance). Black keys: satin-matte
+    // (slight sheen, no reflection of other objects — user requirement).
+    const wBump = this._keyTexture(true);
+    const bBump = this._keyTexture(false);
+    const whiteMat = this._glossMaterial(white.material, { r: 0.11, cc: 1.0, ccr: 0.045, env: 1.15, bump: wBump, bumpS: 0.35 });
+    const blackMat = this._glossMaterial(black ? black.material : null, { r: 0.42, cc: 0.10, ccr: 0.3, env: 0.28, bump: bBump, bumpS: 0.5 });
 
     for (let n = NOTE0; n <= NOTE1; n++) {
       const st = noteToSlot[n];
@@ -932,9 +981,20 @@ export class PianoScene {
       this._animateKeys(dt);
       this.controls.update();
       this._updateFps();
-      if (this.renderer) this.renderer.render(this.scene, this.camera);
+      if (this._useComposer && this.composer) this.composer.render();
+      else if (this.renderer) this.renderer.render(this.scene, this.camera);
     };
     requestAnimationFrame(loop);
+  }
+
+  // user-controlled bloom intensity (0..~1.5); 0 bypasses the composer
+  // entirely so the normal (fast) render path is used.
+  setBloom(v) {
+    this._bloom = v;
+    if (!this.bloomPass) return;
+    this.bloomPass.strength = v;
+    this.bloomPass.enabled = v > 0.001;
+    this._useComposer = v > 0.001;
   }
 
   _updateFps() {
@@ -1013,6 +1073,7 @@ export class PianoScene {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h, false);
+    if (this.composer) this.composer.setSize(w, h);
   }
 
   dispose() {
