@@ -93,7 +93,12 @@
   #errScreen .box{max-width:560px; text-align:center; line-height:1.8; color:var(--dim);}
   #hint{position:fixed; left:50%; bottom:88px; transform:translateX(-50%); z-index:15; font-size:11.5px; color:#5c6670;
     background:rgba(10,12,15,.55); padding:4px 12px; border-radius:14px; white-space:nowrap;}
-  #copyright{position:fixed; right:14px; bottom:60px; z-index:15; font-size:11px; color:#46505c; pointer-events:none;}
+  #copyright{position:fixed; right:14px; bottom:60px; z-index:15; font-size:11.5px; color:#8fa0b0; pointer-events:none;
+    text-shadow:0 1px 6px rgba(0,0,0,.6); font-weight:600; letter-spacing:.3px;}
+  #copyright b{color:#d7dee8; font-weight:700;}
+  /* F8 full UI hide/show */
+  body.ui-hidden #topbar, body.ui-hidden #leftbar, body.ui-hidden #transport,
+  body.ui-hidden #hint, body.ui-hidden #copyright{display:none !important;}
   ::-webkit-scrollbar{width:12px;} ::-webkit-scrollbar-thumb{background:#3a434f; border-radius:6px;}
   .hide{display:none !important;}
 </style>
@@ -198,6 +203,16 @@
       开启后画面出现红/绿/蓝箭头，拖动即可移动镜面位置，位置自动保存；再次点击关闭编辑。
     </div>
   </div>
+  <div class="panel sec">
+    <h3>画面 Display</h3>
+    <div class="row"><span class="lbl">对比度</span><input type="range" id="fxContrast" min="50" max="160" value="100" style="width:110px"></div>
+    <div class="row"><span class="lbl">亮度</span><input type="range" id="fxBright" min="40" max="160" value="100" style="width:110px"></div>
+    <div class="row"><span class="lbl">饱和度</span><input type="range" id="fxSat" min="0" max="200" value="100" style="width:110px"></div>
+    <div class="row"><span class="lbl">泛光</span><input type="range" id="fxBloom" min="0" max="150" value="0" style="width:110px"></div>
+    <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
+      滤镜与泛光实时生效并自动保存；按 <b>F8</b> 隐藏/显示全部界面。
+    </div>
+  </div>
 </div>
 
 <div id="leftbar">
@@ -239,7 +254,7 @@
 </div>
 
 <div id="hint">鼠标/触摸：点击琴键发声，按住横向滑动 = 刮奏；滚轮缩放，右键/拖拽旋转视角</div>
-<div id="copyright">开发者：珂眠 ｜ 联系邮箱：3787165824@qq.com</div>
+<div id="copyright"><b>开发者：Grovlfe（现名珂眠）</b> ｜ 联系邮箱：3787165824@qq.com</div>
 <div id="toasts"></div>
 
 <div id="errScreen"><div class="box" id="errBox"></div></div>
@@ -254,6 +269,6 @@
     "three/addons/": "./js/three/addons/"
 } }
 </script>
-<script type="module" src="./js/app.js?v=62"></script>
+<script type="module" src="./js/app.js?v=63"></script>
 </body>
 </html>
