@@ -26,6 +26,8 @@ export class Sampler {
     this.pitchBend = new Map(); // channel -> bend (-1..1)
     this._bornAt = new Map();   // note -> ctx time of latest noteOn (race guard)
     this._releasedAt = new Map(); // note -> ctx time of latest noteOff
+    this.transpose = 0;         // key change in semitones (-12..12)
+    this.recordSink = null;     // (note, vel, on) hook for recording playback
     this._init();
   }
 
@@ -189,26 +191,39 @@ export class Sampler {
   // ---------- notes ----------
   noteOn(note, vel, opts) {
     opts = opts || {};
-    if (note < NOTE0 || note > NOTE1) return;
+    const n = this._trans(note);
+    if (n < NOTE0 || n > NOTE1) return;
     vel = Math.max(1, Math.min(127, Math.round(vel)));
     // velocity curve
     let g = vel / 127;
     if (this.velCurve === 1) g = Math.pow(g, 1.5);
     else if (this.velCurve === 2) g = Math.pow(g, 0.75);
 
+    if (this.recordSink) this.recordSink(n, vel, true);
+
     if (this.mode === 'pack' && this.pack) {
-      const layers = this.pack.notes[String(note)];
+      const layers = this.pack.notes[String(n)];
       if (layers && layers.length) {
-        this._playSample(note, vel, g, layers, opts);
+        this._playSample(n, vel, g, layers, opts);
         return;
       }
     }
-    if (this.mode === 'imported' && this.imported && this.imported[note] && this.imported[note].length) {
-      this._playImported(note, vel, g, this.imported[note], opts);
+    if (this.mode === 'imported' && this.imported && this.imported[n] && this.imported[n].length) {
+      this._playImported(n, vel, g, this.imported[n], opts);
       return;
     }
     // fallback synth
-    this.fallback.noteOn(this.ctx, this.dry, this.reverb, this.reverbGain, note, vel, g, opts);
+    this.fallback.noteOn(this.ctx, this.dry, this.reverb, this.reverbGain, n, vel, g, opts);
+  }
+
+  // transposition (key change): note -> shifted note, clamped to piano range
+  _trans(note) {
+    const t = this.transpose || 0;
+    if (!t) return note;
+    return Math.max(NOTE0, Math.min(NOTE1, note + t));
+  }
+  setTranspose(semi) {
+    this.transpose = Math.max(-12, Math.min(12, Math.round(semi) || 0));
   }
 
   _playImported(note, vel, gVel, layers, opts) {
@@ -297,8 +312,12 @@ export class Sampler {
     let peak = gVel;
     if (l.atten) peak *= Math.pow(10, -(l.atten) / 200);
     if (this.soft) peak *= 0.48;
-    // attack
-    const atk = 0.0035;
+    // Steinway D-274 dynamics: soft touches are rounder and quieter, heavy
+    // strikes gain body — a wider dynamic range than a plain linear map.
+    const vn = Math.max(0, Math.min(1, (vel - 1) / 126));
+    peak *= 0.80 + 0.55 * Math.pow(vn, 1.5);
+    // attack follows touch: ff ~2 ms, pp ~11 ms (like a real action)
+    const atk = 0.002 + (1 - vn) * 0.009;
     g.gain.setValueAtTime(0, now);
     g.gain.linearRampToValueAtTime(peak, now + atk);
 
@@ -314,6 +333,24 @@ export class Sampler {
 
     const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
     let chain = source;
+    // timbre follows velocity: loud notes get a bright high shelf, soft notes
+    // a slightly darker low shelf — the Steinway grows brighter as you play
+    // harder (on top of the multi-velocity sample layers).
+    if (vel >= 95) {
+      const hs = ctx.createBiquadFilter();
+      hs.type = 'highshelf';
+      hs.frequency.value = 6000;
+      hs.gain.value = 3.0;
+      chain.connect(hs);
+      chain = hs;
+    } else if (vel <= 35) {
+      const lf = ctx.createBiquadFilter();
+      lf.type = 'lowshelf';
+      lf.frequency.value = 900;
+      lf.gain.value = -2.5;
+      chain.connect(lf);
+      chain = lf;
+    }
     if (opts.soft || this.soft) {
       // soft pedal: clearly darker, more felted tone (user: 柔音要体现)
       const filt = ctx.createBiquadFilter();
@@ -424,20 +461,35 @@ export class Sampler {
   }
 
   noteOff(note) {
-    if (note < NOTE0 || note > NOTE1) return;
-    this._releasedAt.set(note, this.ctx.currentTime);
-    const set = this.voices.get(note);
+    const n = this._trans(note);
+    if (n < NOTE0 || n > NOTE1) return;
+    this._releasedAt.set(n, this.ctx.currentTime);
+    if (this.recordSink) this.recordSink(n, 0, false);
+    const set = this.voices.get(n);
     if (!set) return;
     const now = this.ctx.currentTime;
-    const hold = this.sustain || (this.sostenuto && this.sostenutoNotes.has(note));
+    const hold = this.sustain || (this.sostenuto && this.sostenutoNotes.has(n));
     for (const v of [...set]) {
       if (v.sustained) continue;
       if (hold) {
         v.sustained = true;
         continue;
       }
-      this._releaseVoice(v, now, 0.07); // fast damper — crisp, no lingering tail
+      // Real Steinway D-274 damper: bass damps slowly, treble fast; forte
+      // presses damper a little slower (longer natural tail). Exponential
+      // decay, never an instant cut — this removes the "stiff damper" feel.
+      this._releaseVoice(v, now, this._damperTime(n, v.vel));
     }
+  }
+
+  // damper fall time (seconds) modelled after an acoustic grand:
+  // lower notes have longer damped tails, higher notes stop almost instantly.
+  _damperTime(note, vel) {
+    const freq = 27.5 * Math.pow(2, (note - NOTE0) / 12);
+    let t = 0.09 + 900 / freq * 0.28;   // C2 ~0.88s, C4 ~0.35s, C6 ~0.13s
+    t = Math.max(0.09, Math.min(0.9, t));
+    const vn = Math.max(0, Math.min(1, (vel - 1) / 126));
+    return t * (0.8 + 0.5 * vn);
   }
 
   _killVoice(v, now) {
@@ -446,8 +498,8 @@ export class Sampler {
     try {
       v.g.gain.cancelScheduledValues(now);
       v.g.gain.setValueAtTime(Math.max(0.0001, v.g.gain.value), now);
-      v.g.gain.linearRampToValueAtTime(0.0001, now + 0.015);
-      if (v.source && v.source.stop) v.source.stop(now + 0.03);
+      v.g.gain.linearRampToValueAtTime(0.0001, now + 0.035);
+      if (v.source && v.source.stop) v.source.stop(now + 0.05);
     } catch (e) {}
     this._removeVoice(v);
   }
@@ -456,9 +508,13 @@ export class Sampler {
     v.sustained = false;
     try {
       v.g.gain.cancelScheduledValues(now);
-      v.g.gain.setValueAtTime(Math.max(0.0001, v.g.gain.value), now);
-      v.g.gain.linearRampToValueAtTime(0.0001, now + sec);
-      v.source.stop(now + sec + 0.03);
+      const cur = Math.max(0.0001, v.g.gain.value);
+      v.g.gain.setValueAtTime(cur, now);
+      // exponential damping — acoustic dampers decay, they don't linearly cut.
+      // tau = sec/5.5 reaches -60dB near the stop time while the audible front
+      // (the damper contact) falls off fast, matching a real grand's damper.
+      v.g.gain.setTargetAtTime(0.0001, now, Math.max(0.015, sec / 5.5));
+      v.source.stop(now + sec + 0.12);
     } catch (e) {}
     v.releaseT = now + sec;
     // Safety: if the AudioContext stalls (auto-play policy before any user
@@ -466,7 +522,7 @@ export class Sampler {
     // in the pool forever. Force-remove it after the release ramp regardless
     // of the context state — keeps 88-key slams and rapid pedal flips clean.
     if (v._rmTimer) clearTimeout(v._rmTimer);
-    v._rmTimer = setTimeout(() => this._removeVoice(v), (sec + 0.4) * 1000);
+    v._rmTimer = setTimeout(() => this._removeVoice(v), (sec + 0.5) * 1000);
   }
 
   pruneStale() {
