@@ -287,7 +287,9 @@ export class Sampler {
     for (let i = 0; i < use.length; i++) {
       const buf = bufs[i];
       if (!buf) continue;
-      if (quick && this.sustain) break; // pedal caught it
+      // NOTE: do NOT skip quick+pedal notes — a real grand strikes the string
+      // even on a short tap, and the pedal then sustains it. Skipping here
+      // caused "instant gaps" in legato lines with the sustain pedal down.
       this._spawnVoice(note, buf, use[i], vel, gVel, pan, { ...opts, quick }, now);
     }
   }
@@ -321,12 +323,15 @@ export class Sampler {
     g.gain.setValueAtTime(0, now);
     g.gain.linearRampToValueAtTime(peak, now + atk);
 
-    if (opts.quick) {
+    if (opts.quick && !(this.sustain || (this.sostenuto && this.sostenutoNotes.has(note)))) {
       // finger was lifted while the sample loaded: a short tap with its full
-      // attack preserved — audible in super-fast trills, no lingering tail.
-      g.gain.linearRampToValueAtTime(0.0001, now + 0.12);
+      // attack preserved — audible in super-fast trills. When the pedal is down
+      // the tap continues into the normal sustained voice below (real grand:
+      // the damper is already lifted, the string rings on).
+      const tapSec = Math.max(0.09, Math.min(0.3, this._damperTime(note, vel) * 0.7));
+      g.gain.linearRampToValueAtTime(0.0001, now + tapSec);
       source.start(now);
-      source.stop(now + 0.16);
+      source.stop(now + tapSec + 0.05);
       this._bornAt.delete(note);
       return;
     }
@@ -403,12 +408,16 @@ export class Sampler {
     const bornAt = this._bornAt.get(note) || 0;
     const held = this.sustain || (this.sostenuto && this.sostenutoNotes.has(note));
     if ((relAt > bornAt || relAt > now) && !held) {
+      // Released while the sample was loading, no pedal: play a short damped
+      // tap with a NATURAL damper tail (not a hard cut) so fast legato keeps
+      // flowing — the damper falls but the string decays, it never snaps.
+      const tapSec = Math.max(0.09, Math.min(0.3, this._damperTime(note, vel) * 0.7));
       g.gain.cancelScheduledValues(now);
       g.gain.setValueAtTime(Math.max(0.0001, peak * 0.9), now);
-      g.gain.linearRampToValueAtTime(0.0001, now + 0.05);
+      g.gain.linearRampToValueAtTime(0.0001, now + tapSec);
       source.start(now);
-      source.stop(now + 0.09);
-      voice.deadline = now + 0.09;
+      source.stop(now + tapSec + 0.05);
+      voice.deadline = now + tapSec + 0.05;
       this._bornAt.delete(note);
       return;
     }
@@ -493,13 +502,15 @@ export class Sampler {
   }
 
   _killVoice(v, now) {
-    // instant damping of an old same-note voice (damper re-hit behaviour)
+    // instant damping of an old same-note voice (damper re-hit behaviour).
+    // 0.05s: short enough to stay clean in trills, long enough that a re-struck
+    // note doesn't feel like a hard click between two attacks.
     v.sustained = false;
     try {
       v.g.gain.cancelScheduledValues(now);
       v.g.gain.setValueAtTime(Math.max(0.0001, v.g.gain.value), now);
-      v.g.gain.linearRampToValueAtTime(0.0001, now + 0.035);
-      if (v.source && v.source.stop) v.source.stop(now + 0.05);
+      v.g.gain.linearRampToValueAtTime(0.0001, now + 0.05);
+      if (v.source && v.source.stop) v.source.stop(now + 0.07);
     } catch (e) {}
     this._removeVoice(v);
   }
