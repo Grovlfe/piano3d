@@ -1,10 +1,10 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
-import { PianoScene } from './scene.js?v=78';
-import { Sampler } from './audio/sampler.js?v=61';
-import { MidiDevice } from './midi/device.js?v=56';
-import { MidiPlayer } from './midi/player.js?v=56';
-import { parseMidi } from './midi/parse.js?v=55';
+import { PianoScene } from './scene.js?v=79';
+import { Sampler } from './audio/sampler.js?v=62';
+import { MidiDevice } from './midi/device.js?v=57';
+import { MidiPlayer } from './midi/player.js?v=57';
+import { parseMidi } from './midi/parse.js?v=56';
 import { TransformControls } from 'three/addons/controls/TransformControls.js?v=53';
 
 const $ = (id) => document.getElementById(id);
@@ -105,8 +105,8 @@ const midi = new MidiDevice(engine, scene, {
 
 const player = new MidiPlayer(engine, scene, {
   onLoad(p) {
-    state.currentSong = -1;
-    $('tname').textContent = p.name || '未命名';
+    const cur = state.playlist[state.currentSong];
+    $('tname').textContent = p.name || (cur ? cur.name : '') || '未命名';
     $('tmeta').textContent = '格式' + p.format + ' · ' + p.ntrks + ' 轨 · ' + _fmt(p.duration);
     $('playbtn').textContent = '▶';
   },
@@ -441,10 +441,10 @@ function loadMidiFile(file) {
     try {
       const parsed = parseMidi(reader.result);
       const key = (file.webkitRelativePath || file.name);
-      state.playlist.push({ name: parsed.name || file.name, file: key, parsed });
+      state.playlist.push({ name: parsed.name || cleanName(key), file: key, parsed });
       _renderPlaylist();
       if (state.playlist.length === 1) selectSong(0);
-      toast('已加载：' + (parsed.name || file.name), 'ok');
+      toast('已加载：' + (parsed.name || cleanName(key)), 'ok');
     } catch (err) {
       toast('无法解析 ' + file.name + '：' + err.message, 'err');
     }
@@ -472,6 +472,12 @@ function selectSong(i) {
   state.currentSong = i;
   player.load(state.playlist[i].parsed);
   _renderPlaylist();
+}
+
+// strip the extension (and nothing else) from a file path/name for display
+function cleanName(n) {
+  if (!n) return '';
+  return String(n).replace(/\.[^.\/\\]+$/, '');
 }
 
 // ---------- SF2 import ----------
