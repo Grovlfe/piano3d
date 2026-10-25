@@ -214,13 +214,13 @@ export class PianoScene {
       if (this.cb.onWarn) this.cb.onWarn('模型加载失败，已使用内置简易钢琴模型。');
     };
     if (onGitHubPages) {
-      // Serve the 12 model chunks through the jsDelivr CDN (CORS-enabled,
-      // globally cached) so first load is fast even from China.
-      const CDN = 'https://cdn.jsdelivr.net/gh/Grovlfe/piano3d@main/assets/piano.glb.';
+      // 12 same-origin chunks (the repo cannot hold the 55 MB GLB via the
+      // Contents API, so it ships split; same-origin fetch is CORS-free).
+      // Note: jsDelivr rejects the chunk filenames, so keep these on Pages.
       const CHUNKS = 12;
       Promise.all(
         Array.from({ length: CHUNKS }, (_, i) =>
-          fetch(CDN + String(i).padStart(2, '0'))
+          fetch('assets/piano.glb.' + String(i).padStart(2, '0'))
             .then((r) => {
               if (!r.ok) throw new Error('chunk ' + i + ' http ' + r.status);
               return r.arrayBuffer();
