@@ -90,12 +90,14 @@ export class MidiPlayer {
 
   _tick() {
     if (!this.playing) return;
+    // evs must be declared OUTSIDE the try block — `const` is block-scoped,
+    // and the end-of-track check below uses it too.
+    const evs = this.events || [];
     try {
       // advance wall-clock: count in real seconds
       const dt = 0.025 * this.rate;
       this.sec += dt;
       const horizon = this.sec + this._lookahead;
-      const evs = this.events;
       while (this.pos < evs.length && evs[this.pos].sec <= horizon) {
         this._fire(evs[this.pos]);
         this.pos++;
