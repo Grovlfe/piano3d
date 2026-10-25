@@ -106,7 +106,8 @@ const midi = new MidiDevice(engine, scene, {
 const player = new MidiPlayer(engine, scene, {
   onLoad(p) {
     const cur = state.playlist[state.currentSong];
-    $('tname').textContent = p.name || (cur ? cur.name : '') || '未命名';
+    // 播放栏名称以文件名为准（用户要求：直接显示文件名称）
+    $('tname').textContent = (cur && cur.name) || p.name || '未命名';
     $('tmeta').textContent = '格式' + p.format + ' · ' + p.ntrks + ' 轨 · ' + _fmt(p.duration);
     $('playbtn').textContent = '▶';
   },
@@ -136,8 +137,14 @@ function _checkLoading() {
   }
 }
 
-// ---------- user data persistence (localStorage) ----------
+// ---------- user data persistence (localStorage + URL-hash cloud mirror) ----------
 const PREFS_KEY = 'piano3d_prefs_v2';
+function _encodePrefs(p) {
+  try { return btoa(unescape(encodeURIComponent(JSON.stringify(p)))); } catch (e) { return ''; }
+}
+function _decodePrefs(s) {
+  try { return JSON.parse(decodeURIComponent(escape(atob(s)))); } catch (e) { return null; }
+}
 function _savePrefs() {
   const p = {
     vol: $('vol').value, rev: $('rev').value, velCurve: $('velCurve').value,
@@ -148,10 +155,24 @@ function _savePrefs() {
     fxSat: $('fxSat').value, fxBloom: $('fxBloom').value,
   };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* storage unavailable */ }
+  // cloud mirror: the URL itself carries the settings — open this link on any
+  // device/browser and everything is restored (copy/save the link = cloud save).
+  const enc = _encodePrefs(p);
+  try { if (enc && location.hash !== '#p=' + enc) history.replaceState(null, '', '#p=' + enc); } catch (e) { /* noop */ }
 }
 function _loadPrefs() {
   let p = {};
-  try { p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch (e) { p = {}; }
+  // 1) URL-hash data wins (cloud link), 2) localStorage fallback
+  const hm = location.hash.match(/^#p=(.+)$/);
+  if (hm) {
+    try {
+      const hp = _decodePrefs(decodeURIComponent(hm[1]));
+      if (hp && typeof hp === 'object') p = hp;
+    } catch (e) { p = {}; }
+  }
+  if (!p || !Object.keys(p).length) {
+    try { p = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch (e) { p = {}; }
+  }
   const set = (id, v) => { const el = $(id); if (el && v !== undefined && v !== '') el.value = v; };
   set('vol', p.vol); set('rev', p.rev); set('velCurve', p.velCurve);
   set('lightAz', p.lightAz); set('lightEl', p.lightEl); set('lightPow', p.lightPow);
@@ -293,6 +314,56 @@ function _wireUI() {
   $('lightCol').addEventListener('input', applyLight);
   ['fxContrast', 'fxBright', 'fxSat', 'fxBloom'].forEach((id) =>
     $(id).addEventListener('input', _applyFx));
+  // restore default lighting (and persist it)
+  $('lightReset').addEventListener('click', () => {
+    const set = (id, v) => { const el = $(id); if (el) el.value = v; };
+    set('lightAz', 323); set('lightEl', 52); set('lightPow', 150); set('lightCol', '#fff2df');
+    applyLight();
+    toast('光影已还原默认', 'ok');
+  });
+  // export ALL settings (incl. mirror position) to a JSON file for cloud backup
+  $('btnExport').addEventListener('click', () => {
+    const out = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('piano3d_') === 0) {
+        try { out[k] = JSON.parse(localStorage.getItem(k)); } catch (e) { out[k] = localStorage.getItem(k); }
+      }
+    }
+    out._meta = { app: '3D钢琴演奏台 VSL Steinway D-274', developer: 'Grovlfe（珂眠）', contact: '3787165824@qq.com', exported: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'piano3d-settings.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+    toast('设置已导出（可保存到云盘/邮箱，跨设备导入恢复）', 'ok');
+  });
+  // import settings JSON -> restore everything, then reload
+  $('btnImport').addEventListener('click', () => $('prefsImport').click());
+  $('prefsImport').addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const j = JSON.parse(rd.result);
+        let n = 0;
+        for (const k of Object.keys(j)) {
+          if (k.indexOf('piano3d_') === 0) {
+            localStorage.setItem(k, typeof j[k] === 'string' ? j[k] : JSON.stringify(j[k]));
+            n++;
+          }
+        }
+        e.target.value = '';
+        toast('已导入 ' + n + ' 项设置，正在应用…', 'ok');
+        setTimeout(() => location.reload(), 600);
+      } catch (err) {
+        toast('导入失败：' + err.message, 'err');
+      }
+    };
+    rd.readAsText(f);
+  });
   // view sliders — live camera control, saved on every move (survives restarts)
   const applyView = () => {
     if (!scene) return;
