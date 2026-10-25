@@ -1,9 +1,9 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
-import { PianoScene } from './scene.js?v=79';
+import { PianoScene } from './scene.js?v=80';
 import { Sampler } from './audio/sampler.js?v=62';
 import { MidiDevice } from './midi/device.js?v=57';
-import { MidiPlayer } from './midi/player.js?v=57';
+import { MidiPlayer } from './midi/player.js?v=58';
 import { parseMidi } from './midi/parse.js?v=56';
 import { TransformControls } from 'three/addons/controls/TransformControls.js?v=53';
 
@@ -144,6 +144,8 @@ function _savePrefs() {
     lightAz: $('lightAz').value, lightEl: $('lightEl').value, lightPow: $('lightPow').value,
     lightCol: $('lightCol').value, quality: $('qualitySel').value, octave: state.octave,
     camAz: $('camAz').value, camEl: $('camEl').value, camDist: $('camDist').value,
+    fxContrast: $('fxContrast').value, fxBright: $('fxBright').value,
+    fxSat: $('fxSat').value, fxBloom: $('fxBloom').value,
   };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* storage unavailable */ }
 }
@@ -155,6 +157,8 @@ function _loadPrefs() {
   set('lightAz', p.lightAz); set('lightEl', p.lightEl); set('lightPow', p.lightPow);
   set('lightCol', p.lightCol); set('qualitySel', p.quality);
   set('camAz', p.camAz); set('camEl', p.camEl); set('camDist', p.camDist);
+  set('fxContrast', p.fxContrast); set('fxBright', p.fxBright);
+  set('fxSat', p.fxSat); set('fxBloom', p.fxBloom);
   if (p.octave !== undefined) state.octave = Math.max(-2, Math.min(2, +p.octave || 0));
   // apply loaded values
   engine.setVolume(($('vol').value / 100));
@@ -175,6 +179,19 @@ function _loadPrefs() {
     scene.setLightColor($('lightCol').value);
     scene.setView(+$('camAz').value, +$('camEl').value, +$('camDist').value / 100);
   }
+  _applyFx();
+}
+
+// 画面滤镜（CSS filter 作用于 canvas 容器）+ 泛光（scene bloom pass）
+function _applyFx() {
+  const c = +$('fxContrast').value / 100;
+  const b = +$('fxBright').value / 100;
+  const s = +$('fxSat').value / 100;
+  const g = $('glwrap');
+  if (g) g.style.filter = 'contrast(' + c.toFixed(2) + ') brightness(' + b.toFixed(2) + ') saturate(' + s.toFixed(2) + ')';
+  const bl = +$('fxBloom').value / 100;
+  if (scene) scene.setBloom(bl);
+  _savePrefs();
 }
 
 // ---------- init ----------
@@ -274,6 +291,8 @@ function _wireUI() {
   $('lightEl').addEventListener('input', applyLight);
   $('lightPow').addEventListener('input', applyLight);
   $('lightCol').addEventListener('input', applyLight);
+  ['fxContrast', 'fxBright', 'fxSat', 'fxBloom'].forEach((id) =>
+    $(id).addEventListener('input', _applyFx));
   // view sliders — live camera control, saved on every move (survives restarts)
   const applyView = () => {
     if (!scene) return;
@@ -392,6 +411,13 @@ function _wireUI() {
   const kbd = new Set();
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
+    // F8: hide/show all UI
+    if (e.key === 'F8') {
+      e.preventDefault();
+      const hidden = document.body.classList.toggle('ui-hidden');
+      toast(hidden ? '界面已隐藏（按 F8 恢复）' : '界面已显示');
+      return;
+    }
     const k = e.key.toLowerCase();
     if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(e.key)) e.preventDefault();
     // octave shift (before note mapping so - / = work)
@@ -441,10 +467,12 @@ function loadMidiFile(file) {
     try {
       const parsed = parseMidi(reader.result);
       const key = (file.webkitRelativePath || file.name);
-      state.playlist.push({ name: parsed.name || cleanName(key), file: key, parsed });
+      // The playlist shows the FILE name (users' MIDI files usually have a
+      // meaningful filename; embedded meta names can be garbage/乱码).
+      state.playlist.push({ name: file.name, file: key, parsed });
       _renderPlaylist();
       if (state.playlist.length === 1) selectSong(0);
-      toast('已加载：' + (parsed.name || cleanName(key)), 'ok');
+      toast('已加载：' + file.name, 'ok');
     } catch (err) {
       toast('无法解析 ' + file.name + '：' + err.message, 'err');
     }
