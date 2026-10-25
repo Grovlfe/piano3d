@@ -1,7 +1,7 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
 import { PianoScene } from './scene.js?v=78';
-import { Sampler } from './audio/sampler.js?v=60';
+import { Sampler } from './audio/sampler.js?v=61';
 import { MidiDevice } from './midi/device.js?v=56';
 import { MidiPlayer } from './midi/player.js?v=56';
 import { parseMidi } from './midi/parse.js?v=55';
