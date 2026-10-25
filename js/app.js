@@ -1,11 +1,11 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
-import { PianoScene } from './scene.js?v=76';
-import { Sampler } from './audio/sampler.js?v=59';
-import { MidiDevice } from './midi/device.js?v=55';
-import { MidiPlayer } from './midi/player.js?v=55';
-import { parseMidi } from './midi/parse.js?v=54';
-import { TransformControls } from 'three/addons/controls/TransformControls.js?v=52';
+import { PianoScene } from './scene.js?v=77';
+import { Sampler } from './audio/sampler.js?v=60';
+import { MidiDevice } from './midi/device.js?v=56';
+import { MidiPlayer } from './midi/player.js?v=56';
+import { parseMidi } from './midi/parse.js?v=55';
+import { TransformControls } from 'three/addons/controls/TransformControls.js?v=53';
 
 const $ = (id) => document.getElementById(id);
 
