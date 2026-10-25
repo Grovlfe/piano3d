@@ -96,24 +96,60 @@ export class Sampler {
   // ---------- soundfont pack loading (default VSL OGG pack) ----------
   async loadDefaultPack(manifestUrl, onProgress) {
     try {
-      const resp = await fetch(manifestUrl);
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const manifest = await resp.json();
-      this.pack = manifest;
-      this.mode = 'pack';
-      if (this.cb.onStatus) this.cb.onStatus('默认音源 VSL Steinway D-274（来自你提供的 SF2）已就绪');
-      // preload common middle range
-      const pre = [48, 52, 55, 60, 64, 67, 72, 76, 79];
-      let done = 0;
-      for (const n of pre) {
-        const layers = this.pack.notes[String(n)];
-        if (layers) {
-          for (const l of layers) {
-            try { await this._getBuffer(l.f); } catch (e) {}
+      // Remote (GitHub Pages) serves the whole sample set as ONE piano.pack
+      // through the jsDelivr CDN (CORS-friendly, fast) so startup downloads a
+      // single 18 MB file instead of 352 small requests. Local/dev falls back
+      // to the loose manifest+ogg layout.
+      const onGitHubPages = location.hostname.indexOf('github.io') >= 0;
+      const base = onGitHubPages
+        ? 'https://cdn.jsdelivr.net/gh/Grovlfe/piano3d@main/soundfont/default/'
+        : 'soundfont/default/';
+      let packOk = false;
+      try {
+        const pr = await fetch(base + 'piano.pack');
+        if (pr.ok) {
+          const ab = await pr.arrayBuffer();
+          const dv = new DataView(ab);
+          const magic = new TextDecoder('latin1').decode(new Uint8Array(ab, 0, 4));
+          if (magic === 'PKP1') {
+            const jlen = dv.getUint32(4, true);
+            const jsonTxt = new TextDecoder('utf-8').decode(new Uint8Array(ab, 8, jlen));
+            this.packData = { json: JSON.parse(jsonTxt), data: ab.slice(8 + jlen) };
+            this.pack = this.packData.json;
+            this.mode = 'pack';
+            packOk = true;
           }
         }
-        done++;
-        if (onProgress) onProgress(done / pre.length);
+      } catch (e) { /* fall through to loose files */ }
+      if (!packOk) {
+        const resp = await fetch(manifestUrl);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        this.pack = await resp.json();
+        this.mode = 'pack';
+        this.packData = null;
+      }
+      if (this.cb.onStatus) this.cb.onStatus('默认音源 VSL Steinway D-274（来自你提供的 SF2）已就绪');
+      // Preload the whole keyboard's softest layer (88 samples) in parallel,
+      // plus every layer of the middle octaves — so the first note you play is
+      // already cached (no first-strike dropouts on slow connections).
+      const preNotes = [];
+      for (let n = 21; n <= 108; n++) preNotes.push(n);
+      const preLayers = [];
+      for (const n of preNotes) {
+        const layers = this.pack.notes[String(n)];
+        if (!layers) continue;
+        for (const l of layers) {
+          if (l.velLo <= 20) preLayers.push(l.f);      // softest layer, every key
+          else if (n >= 40 && n <= 88) preLayers.push(l.f); // all layers, middle
+        }
+      }
+      let done = 0;
+      const BATCH = 8;
+      for (let i = 0; i < preLayers.length; i += BATCH) {
+        const chunk = preLayers.slice(i, i + BATCH);
+        await Promise.all(chunk.map(f => this._getBuffer(f).catch(() => null)));
+        done += chunk.length;
+        if (onProgress) onProgress(Math.min(1, done / preLayers.length));
       }
       this.ready = true;
       if (this.cb.onReady) this.cb.onReady();
@@ -128,9 +164,16 @@ export class Sampler {
     if (this.cache.has(file)) return this.cache.get(file);
     if (this.loading.has(file)) return this.loading.get(file);
     const p = (async () => {
-      const resp = await fetch('soundfont/default/' + file);
-      if (!resp.ok) throw new Error(file + ' HTTP ' + resp.status);
-      const ab = await resp.arrayBuffer();
+      let ab;
+      if (this.packData) {
+        const t = this.packData.json.table[file];
+        if (!t) throw new Error(file + ' not in pack');
+        ab = this.packData.data.slice(t[0], t[0] + t[1]);
+      } else {
+        const resp = await fetch('soundfont/default/' + file);
+        if (!resp.ok) throw new Error(file + ' HTTP ' + resp.status);
+        ab = await resp.arrayBuffer();
+      }
       const buf = await this.ctx.decodeAudioData(ab);
       this.cache.set(file, buf);
       return buf;
@@ -217,7 +260,11 @@ export class Sampler {
     const bufs = await Promise.all(use.map(l => this._getBuffer(l.f).catch(() => null)));
     if (this._dead) return;
     const relAt = this._releasedAt.get(note) || -1;
-    const quick = relAt > now - 0.05; // key released before samples became ready -> short tap
+    // key released before samples became ready -> short tap. Window widened to
+    // 0.30 s: on a slow (remote/CDN) connection a sample can arrive up to a few
+    // hundred ms after the finger lifted; without this the note would ring the
+    // full sample tail even with no sustain pedal (the lingering-note bug).
+    const quick = relAt > now - 0.3;
     for (let i = 0; i < use.length; i++) {
       const buf = bufs[i];
       if (!buf) continue;
@@ -304,20 +351,29 @@ export class Sampler {
     // sustained. If not sustained (no pedal), it simply dies out naturally.
     const dur = buf.duration / pb;
     const stopAt = now + dur + 0.05;
+
+    // KEY FIX: finger already lifted (noteOff before this voice spawned, or
+    // the sample finished loading after the key-up): play only a very short
+    // damped tap instead of the full sample tail. This kills both the
+    // "note rings on after I lifted it" and the "un-damped glissando tail"
+    // bugs without a sustain pedal.
+    const relAt = this._releasedAt.get(note) || -1;
+    const bornAt = this._bornAt.get(note) || 0;
+    const held = this.sustain || (this.sostenuto && this.sostenutoNotes.has(note));
+    if ((relAt > bornAt || relAt > now) && !held) {
+      g.gain.cancelScheduledValues(now);
+      g.gain.setValueAtTime(Math.max(0.0001, peak * 0.9), now);
+      g.gain.linearRampToValueAtTime(0.0001, now + 0.05);
+      source.start(now);
+      source.stop(now + 0.09);
+      voice.deadline = now + 0.09;
+      this._bornAt.delete(note);
+      return;
+    }
+
     source.start(now);
     source.stop(stopAt);
     voice.deadline = stopAt;
-
-    // KEY FIX: noteOff arrived AFTER this noteOn (rapid runs / glissando /
-    // samples still loading when the finger lifted). Without this the voice
-    // plays the whole long piano sample to its tail — lingering notes with NO
-    // sustain pedal (reported bug: 不踩延音踏板部分音还延音 / 刮奏多个音延音).
-    const relAt = this._releasedAt.get(note) || -1;
-    const held = this.sustain || (this.sostenuto && this.sostenutoNotes.has(note));
-    if (relAt > now && !held) {
-      this._releaseVoice(voice, now, 0.07);
-      return;
-    }
 
     // natural long decay envelope during sustain (real piano: the pedal lifts
     // the dampers but the string still fades out over several seconds)
@@ -432,14 +488,18 @@ export class Sampler {
   }
 
   _prune() {
-    if (this.allVoices.length <= 160) return;
+    // Generous ceiling so violent 88-key + pedal playing never drops a voice:
+    // evict OLD released/sustained voices first, never a voice younger than
+    // 0.35 s (it may be the note the user just struck).
+    const LIMIT = 288, SOFT = 260;
+    if (this.allVoices.length <= LIMIT) return;
     const now = this.ctx.currentTime;
     const candidates = this.allVoices
-      .filter(v => !v.sustained || v.releaseT > 0)
+      .filter(v => (v.releaseT > 0 || !v.sustained) && now - v.now > 0.35)
       .sort((a, b) => a.releaseT - b.releaseT);
-    while (this.allVoices.length > 140 && candidates.length) {
+    while (this.allVoices.length > SOFT && candidates.length) {
       const v = candidates.shift();
-      if (v) { this._releaseVoice(v, now, 0.015); }
+      if (v) this._releaseVoice(v, now, 0.012);
     }
   }
 
