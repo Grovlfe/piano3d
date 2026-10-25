@@ -127,6 +127,8 @@
     <span class="chip">画质 <b id="stQuality">自动</b></span>
   </div>
   <div id="toptools">
+    <button id="btnExport" class="mini" title="下载全部设置 JSON（可存云盘/邮箱，跨设备恢复）">导出设置</button>
+    <button id="btnImport" class="mini" title="上传设置 JSON 恢复全部数据">导入设置</button>
     <button id="btnHelp">帮助</button>
     <select id="qualitySel">
       <option value="auto" selected>画质：自动</option>
@@ -183,6 +185,7 @@
     <div class="row"><span class="lbl">仰角</span><input type="range" id="lightEl" min="8" max="80" value="52" style="width:110px"></div>
     <div class="row"><span class="lbl">强度</span><input type="range" id="lightPow" min="0" max="300" value="150" style="width:110px"></div>
     <div class="row"><span class="lbl">颜色</span><input type="color" id="lightCol" value="#fff2df" style="width:40px;height:22px;border:none;background:none;padding:0"></div>
+    <div class="row"><span class="lbl">默认</span><button id="lightReset" class="mini">还原光影默认</button></div>
     <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
       调整主光源的方位、仰角、强度与色温，实时影响琴身与琴键光影。
     </div>
@@ -262,6 +265,7 @@
 <input type="file" id="sfPicker" accept=".sf2,.sf3" style="display:none" multiple>
 <input type="file" id="midiPicker" accept=".mid,.midi,.kar,.rmi" style="display:none" multiple>
 <input type="file" id="folderPicker" webkitdirectory style="display:none">
+<input type="file" id="prefsImport" accept=".json,.doubao-prefs" style="display:none">
 
 <script type="importmap">
 { "imports": {
@@ -269,6 +273,6 @@
     "three/addons/": "./js/three/addons/"
 } }
 </script>
-<script type="module" src="./js/app.js?v=63"></script>
+<script type="module" src="./js/app.js?v=64"></script>
 </body>
 </html>
