@@ -61,6 +61,7 @@ export class PianoScene {
     // lights
     const hemi = new THREE.HemisphereLight(0xcfd8e6, 0x1a1c20, 0.55);
     this.scene.add(hemi);
+    this.hemiLight = hemi;
     const key = new THREE.DirectionalLight(0xfff2df, 1.5);
     key.position.set(-1.6, 2.4, 2.2);
     key.castShadow = true;
@@ -797,6 +798,38 @@ export class PianoScene {
   setLightIntensity(v) {
     this._lightIntensity = Math.max(0, Math.min(4, v));
     this.keyLight.intensity = this._lightIntensity;
+  }
+  setBackdrop(hex) { if (this.scene.background) this.scene.background.set(hex); }
+  setEnvStrength(v) {
+    if (this.scene.environment && 'environmentIntensity' in this.scene) {
+      this.scene.environmentIntensity = Math.max(0.1, Math.min(3, v));
+    }
+  }
+  // 光影预设：垂直光照 / 全局光照 / 阴影对比 / 背景幕布
+  applyLightPreset(name) {
+    if (!this.keyLight) return;
+    const P = {
+      default: { hemi:0.55, hemiSky:0xcfd8e6, hemiGround:0x1a1c20, key:1.5, keyCol:0xfff2df, fill:0.35, spot:0.6, az:-0.65, el:0.9, bg:0x232e40, env:1.0, expos:1.05 },
+      ref:     { hemi:0.78, hemiSky:0xe6ecf6, hemiGround:0x0d0f13, key:2.0, keyCol:0xfff6e8, fill:0.10, spot:0.85, az:0.12, el:1.45, bg:0x07080b, env:1.35, expos:1.0 },
+      stage:   { hemi:0.30, hemiSky:0xc9d2e4, hemiGround:0x05060a, key:1.9, keyCol:0xffeed9, fill:0.10, spot:1.5, az:-0.8, el:1.25, bg:0x040507, env:0.9, expos:0.95 },
+      cool:    { hemi:0.85, hemiSky:0xbcd0ef, hemiGround:0x14161c, key:0.95, keyCol:0xdfe9ff, fill:0.5, spot:0.5, az:0.6, el:0.75, bg:0x14171c, env:0.85, expos:1.0 }
+    };
+    const p = P[name] || P.default;
+    this.hemiLight.intensity = p.hemi;
+    this.hemiLight.color.set(p.hemiSky);
+    this.hemiLight.groundColor.set(p.hemiGround);
+    this.keyLight.intensity = p.key;
+    this.keyLight.color.set(p.keyCol);
+    this.fillLight.intensity = p.fill;
+    this.spot.intensity = p.spot;
+    this._lightAz = p.az; this._lightEl = p.el;
+    this._lightIntensity = p.key;
+    this._lightColor = p.keyCol;
+    this.setBackdrop(p.bg);
+    this.setEnvStrength(p.env);
+    this.renderer.toneMappingExposure = p.expos;
+    this._applyLight();
+    if (this._presetListener) { try { this._presetListener(name, p); } catch (e) {} }
   }
   _applyLight() {
     if (!this.keyLight) return;
