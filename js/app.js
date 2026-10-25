@@ -1,7 +1,7 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
 import { PianoScene } from './scene.js?v=80';
-import { Sampler } from './audio/sampler.js?v=62';
+import { Sampler } from './audio/sampler.js?v=63';
 import { MidiDevice } from './midi/device.js?v=57';
 import { MidiPlayer } from './midi/player.js?v=58';
 import { parseMidi } from './midi/parse.js?v=56';
@@ -28,6 +28,7 @@ const state = {
   playlist: [],     // {name, parsed}
   currentSong: -1,
   octave: 0,
+  transpose: 0,     // key change in semitones (-12..12)
 };
 
 const engine = new Sampler({
@@ -153,6 +154,7 @@ function _savePrefs() {
     camAz: $('camAz').value, camEl: $('camEl').value, camDist: $('camDist').value,
     fxContrast: $('fxContrast').value, fxBright: $('fxBright').value,
     fxSat: $('fxSat').value, fxBloom: $('fxBloom').value,
+    transpose: state.transpose,
   };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* storage unavailable */ }
   // cloud mirror: the URL itself carries the settings — open this link on any
@@ -181,6 +183,7 @@ function _loadPrefs() {
   set('fxContrast', p.fxContrast); set('fxBright', p.fxBright);
   set('fxSat', p.fxSat); set('fxBloom', p.fxBloom);
   if (p.octave !== undefined) state.octave = Math.max(-2, Math.min(2, +p.octave || 0));
+  if (p.transpose !== undefined) state.transpose = Math.max(-12, Math.min(12, Math.round(+p.transpose) || 0));
   // apply loaded values
   engine.setVolume(($('vol').value / 100));
   engine.setReverb($('rev').value / 100);
@@ -201,6 +204,7 @@ function _loadPrefs() {
     scene.setView(+$('camAz').value, +$('camEl').value, +$('camDist').value / 100);
   }
   _applyFx();
+  _tp();
 }
 
 // 画面滤镜（CSS filter 作用于 canvas 容器）+ 泛光（scene bloom pass）
@@ -213,6 +217,16 @@ function _applyFx() {
   const bl = +$('fxBloom').value / 100;
   if (scene) scene.setBloom(bl);
   _savePrefs();
+}
+
+// 调号（移调）：作用于声音（sampler 层统一处理 MIDI/设备/键盘/播放）
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+function _tp() {
+  const t = state.transpose;
+  const semi = ((t % 12) + 12) % 12;
+  const oct = 4 + Math.floor((12 + t) / 12) - 1;
+  $('tpLabel').textContent = NOTE_NAMES[semi] + oct;
+  engine.setTranspose(t);
 }
 
 // ---------- init ----------
@@ -469,6 +483,92 @@ function _wireUI() {
     const frac = (e.clientX - r.left) / r.width;
     player.seek(frac * player.duration);
   });
+
+  // ---------- key change (调号/移调) ----------
+  $('tpDown').addEventListener('click', () => { state.transpose = Math.max(-12, state.transpose - 1); _tp(); _savePrefs(); toast('调号：' + $('tpLabel').textContent, ''); });
+  $('tpUp').addEventListener('click', () => { state.transpose = Math.min(12, state.transpose + 1); _tp(); _savePrefs(); toast('调号：' + $('tpLabel').textContent, ''); });
+
+  // ---------- record & save user performance as a MIDI song ----------
+  let rec = null; // {start, events}
+  $('recbtn').addEventListener('click', () => {
+    if (!rec) {
+      engine.resume();
+      rec = { start: performance.now(), events: [] };
+      engine.recordSink = (note, vel, on) => {
+        if (!rec) return;
+        const t = (performance.now() - rec.start) / 1000;
+        rec.events.push([t, note, vel, on]);
+      };
+      $('recbtn').classList.add('rec');
+      $('recbtn').textContent = '⏹ 停止';
+      toast('开始录制演奏…', 'ok');
+    } else {
+      const events = rec.events;
+      rec = null;
+      engine.recordSink = null;
+      $('recbtn').classList.remove('rec');
+      $('recbtn').textContent = '● 录制';
+      if (!events.length) { toast('没有录到音符', 'warn'); return; }
+      const name = '我的演奏_' + new Date().toISOString().replace(/[:.]/g, '').slice(5, 13) + '.mid';
+      try {
+        const mid = _buildSMF(events, 120);
+        _saveMidiDownload(mid, name);
+        _addRecordedSong(mid, name);
+        toast('已保存曲目：' + name, 'ok');
+      } catch (e) {
+        toast('保存失败：' + e.message, 'err');
+      }
+    }
+  });
+
+  function _saveMidiDownload(bytes, name) {
+    const blob = new Blob([bytes], { type: 'audio/midi' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  function _addRecordedSong(bytes, name) {
+    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    try {
+      const parsed = parseMidi(buf);
+      state.playlist.unshift({ name, parsed });
+      _renderPlaylist();
+      if (state.currentSong < 0) state.currentSong = 0;
+    } catch (e) {
+      toast('曲目已下载，但加入列表失败：' + (e && e.message || e), 'warn');
+    }
+  }
+
+  // build a standard SMF (format 0) from recorded events
+  function _buildSMF(events, bpm) {
+    const div = 480;
+    const tempoUs = Math.round(60000000 / bpm);
+    const ev = events.slice().sort((a, b) => a[0] - b[0]);
+    const track = [];
+    const push = (...b) => track.push(...b);
+    const vlq = (n) => { const b = []; b.unshift(n & 127); while (n >>= 7) b.unshift((n & 127) | 128); return b; };
+    push(0x00, 0xFF, 0x51, 0x03, (tempoUs >> 16) & 255, (tempoUs >> 8) & 255, tempoUs & 255);
+    let lastTick = 0, lastSt = -1;
+    for (const [t, note, vel, on] of ev) {
+      const tick = Math.max(0, Math.round(t * div * bpm / 60));
+      const dt = Math.max(0, tick - lastTick);
+      lastTick = tick;
+      push(...vlq(dt));
+      const st = on ? 0x90 : 0x80;
+      if (st !== lastSt) { push(st); lastSt = st; }
+      push(note, on ? vel : 0);
+    }
+    push(0x00, 0xFF, 0x2F, 0x00);
+    const hdr = [0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0x01, 0xE0];
+    const len = track.length;
+    const trk = [0x4D, 0x54, 0x72, 0x6B, (len >>> 24) & 255, (len >>> 16) & 255, (len >>> 8) & 255, len & 255];
+    const out = new Uint8Array(hdr.length + trk.length + track.length);
+    out.set(hdr, 0); out.set(trk, hdr.length); out.set(track, hdr.length + trk.length);
+    return out;
+  }
 
   // octave
   $('octDown').addEventListener('click', () => { state.octave = Math.max(-2, state.octave - 1); _oct(); _savePrefs(); });
