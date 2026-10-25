@@ -232,6 +232,7 @@ export class Sampler {
 
   async _playSample(note, vel, gVel, layers, opts) {
     const now = this.ctx.currentTime;
+    const myBorn = now;
     this._bornAt.set(note, now);
     // Re-trigger hygiene: quickly damp any OLD voices of the SAME note before
     // sounding a new one. Prevents layered "echo" artifacts when a note is
@@ -259,12 +260,15 @@ export class Sampler {
 
     const bufs = await Promise.all(use.map(l => this._getBuffer(l.f).catch(() => null)));
     if (this._dead) return;
+    // SUPER-FAST TRILL GUARD (轮指): while this sample was loading, a NEWER
+    // noteOn for the same note arrived — this request is stale. Drop it and
+    // let the newest press own the note; otherwise fast repeated single notes
+    // get swallowed (each older async finishes late and misreads as "released").
+    if ((this._bornAt.get(note) || 0) > myBorn) return;
     const relAt = this._releasedAt.get(note) || -1;
-    // key released before samples became ready -> short tap. Window widened to
-    // 0.30 s: on a slow (remote/CDN) connection a sample can arrive up to a few
-    // hundred ms after the finger lifted; without this the note would ring the
-    // full sample tail even with no sustain pedal (the lingering-note bug).
-    const quick = relAt > now - 0.3;
+    // key released before samples became ready -> short tap (still voiced with
+    // a full attack so rapid finger work stays audible).
+    const quick = relAt > myBorn;
     for (let i = 0; i < use.length; i++) {
       const buf = bufs[i];
       if (!buf) continue;
@@ -299,10 +303,11 @@ export class Sampler {
     g.gain.linearRampToValueAtTime(peak, now + atk);
 
     if (opts.quick) {
-      // key was already released while the sample loaded: play a short tap
-      g.gain.linearRampToValueAtTime(0.0001, now + 0.055);
+      // finger was lifted while the sample loaded: a short tap with its full
+      // attack preserved — audible in super-fast trills, no lingering tail.
+      g.gain.linearRampToValueAtTime(0.0001, now + 0.12);
       source.start(now);
-      source.stop(now + 0.09);
+      source.stop(now + 0.16);
       this._bornAt.delete(note);
       return;
     }
