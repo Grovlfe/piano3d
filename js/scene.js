@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=51';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=51';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=51';
-import { Reflector } from 'three/addons/objects/Reflector.js?v=55';
+import { Reflector } from 'three/addons/objects/Reflector.js?v=56';
 
 const WHITE_NOTES = new Set([0, 2, 4, 5, 7, 9, 11]);
 const NOTE0 = 21, NOTE1 = 108;
@@ -214,10 +214,13 @@ export class PianoScene {
       if (this.cb.onWarn) this.cb.onWarn('模型加载失败，已使用内置简易钢琴模型。');
     };
     if (onGitHubPages) {
+      // Serve the 12 model chunks through the jsDelivr CDN (CORS-enabled,
+      // globally cached) so first load is fast even from China.
+      const CDN = 'https://cdn.jsdelivr.net/gh/Grovlfe/piano3d@main/assets/piano.glb.';
       const CHUNKS = 12;
       Promise.all(
         Array.from({ length: CHUNKS }, (_, i) =>
-          fetch('assets/piano.glb.' + String(i).padStart(2, '0'))
+          fetch(CDN + String(i).padStart(2, '0'))
             .then((r) => {
               if (!r.ok) throw new Error('chunk ' + i + ' http ' + r.status);
               return r.arrayBuffer();
