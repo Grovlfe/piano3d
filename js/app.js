@@ -314,6 +314,15 @@ function _wireUI() {
   $('lightCol').addEventListener('input', applyLight);
   ['fxContrast', 'fxBright', 'fxSat', 'fxBloom'].forEach((id) =>
     $(id).addEventListener('input', _applyFx));
+  // settings drawer (right-top ⚙)
+  const openSettings = (on) => {
+    $('settingsDrawer').classList.toggle('open', !!on);
+    $('btnSettings').classList.toggle('active', !!on);
+  };
+  $('btnSettings').addEventListener('click', () => {
+    openSettings(!$('settingsDrawer').classList.contains('open'));
+  });
+  $('btnSettingsClose').addEventListener('click', () => openSettings(false));
   // restore default lighting (and persist it)
   $('lightReset').addEventListener('click', () => {
     const set = (id, v) => { const el = $(id); if (el) el.value = v; };
