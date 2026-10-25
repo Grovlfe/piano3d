@@ -132,17 +132,19 @@ export function parseMidi(arrayBuffer) {
   for (const e of all) e.sec = tickToSec(e.tick);
 
   // track names / song name — many Chinese MIDI files store the name in
-  // GBK/GB2312; UTF-8-decode strictly first, fall back to GBK, then latin-1.
+  // GBK/GB2312/GB18030; UTF-8-decode strictly first, then gb18030 (a superset
+  // of GBK/GB2312), then plain gbk. No latin-1 fallback: it would produce
+  // mojibake for Chinese names — the caller falls back to the file name.
   const decoders = [
     () => new TextDecoder('utf-8', { fatal: true }),
+    () => new TextDecoder('gb18030'),
     () => new TextDecoder('gbk'),
-    () => new TextDecoder('latin1'),
   ];
   function decodeName(data) {
     for (const mk of decoders) {
       try {
         const s = mk().decode(data).replace(/\u0000/g, '').trim();
-        if (s && !/[\uFFFD]/.test(s)) return s;
+        if (s && !/[\uFFFD]/.test(s) && !/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/.test(s)) return s;
       } catch (e) { /* try next encoding */ }
     }
     return '';
