@@ -29,6 +29,8 @@ const state = {
   currentSong: -1,
   octave: 0,
   transpose: 0,     // key change in semitones (-12..12)
+  lightPreset: '',  // light preset: '' | 'ref' | 'stage' | 'cool'
+  backdrop: '',     // backdrop hex (no 0x)
 };
 
 const engine = new Sampler({
@@ -155,6 +157,8 @@ function _savePrefs() {
     fxContrast: $('fxContrast').value, fxBright: $('fxBright').value,
     fxSat: $('fxSat').value, fxBloom: $('fxBloom').value,
     transpose: state.transpose,
+    lightPreset: state.lightPreset || '',
+    backdrop: state.backdrop || '',
   };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* storage unavailable */ }
   // cloud mirror: the URL itself carries the settings — open this link on any
@@ -179,11 +183,22 @@ function _loadPrefs() {
   set('vol', p.vol); set('rev', p.rev); set('velCurve', p.velCurve);
   set('lightAz', p.lightAz); set('lightEl', p.lightEl); set('lightPow', p.lightPow);
   set('lightCol', p.lightCol); set('qualitySel', p.quality);
+  set('backdrop', p.backdrop);
   set('camAz', p.camAz); set('camEl', p.camEl); set('camDist', p.camDist);
   set('fxContrast', p.fxContrast); set('fxBright', p.fxBright);
   set('fxSat', p.fxSat); set('fxBloom', p.fxBloom);
   if (p.octave !== undefined) state.octave = Math.max(-2, Math.min(2, +p.octave || 0));
   if (p.transpose !== undefined) state.transpose = Math.max(-12, Math.min(12, Math.round(+p.transpose) || 0));
+  // light preset + backdrop restore (light only; camera restored from saved sliders)
+  if (p.lightPreset && scene) {
+    state.lightPreset = p.lightPreset;
+    scene.applyLightPreset(p.lightPreset);
+    document.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('on', b.dataset.preset === p.lightPreset));
+  }
+  if (p.backdrop && scene) {
+    state.backdrop = p.backdrop;
+    scene.setBackdrop('0x' + p.backdrop);
+  }
   // apply loaded values
   engine.setVolume(($('vol').value / 100));
   engine.setReverb($('rev').value / 100);
@@ -320,12 +335,56 @@ function _wireUI() {
     scene.setLightDir(($('lightAz').value / 360) * Math.PI * 2, ($('lightEl').value / 180) * Math.PI);
     scene.setLightIntensity($('lightPow').value / 100);
     scene.setLightColor($('lightCol').value);
+    if (state.lightPreset) {
+      state.lightPreset = '';
+      document.querySelectorAll('[data-preset]').forEach((b) => b.classList.remove('on'));
+    }
     _savePrefs();
   };
   $('lightAz').addEventListener('input', applyLight);
   $('lightEl').addEventListener('input', applyLight);
   $('lightPow').addEventListener('input', applyLight);
   $('lightCol').addEventListener('input', applyLight);
+  // light presets + backdrop (垂直光/全局光/阴影对比 + 背景幕布)
+  const PRESET_CAMS = {
+    ref:   { az: 0,   el: 10, dist: 1.35 },
+    stage: { az: 0,   el: 24, dist: 2.4 },
+    cool:  { az: 35,  el: 18, dist: 2.8 }
+  };
+  const _applyPreset = (name) => {
+    if (!scene) return;
+    scene.applyLightPreset(name);
+    // sync light sliders + backdrop select to the preset's values (UI honesty)
+    const LP_UI = {
+      ref:   { az: 7,   el: 83, pow: 200, col: '#fff6e8', bg: '07080b' },
+      stage: { az: 314, el: 72, pow: 190, col: '#ffeed9', bg: '040507' },
+      cool:  { az: 34,  el: 43, pow: 95,  col: '#dfe9ff', bg: '14171c' },
+      default:{ az: 323, el: 52, pow: 150, col: '#fff2df', bg: '232e40' }
+    };
+    const u = LP_UI[name];
+    if (u) {
+      const s = (id, v) => { const el = $(id); if (el) el.value = v; };
+      s('lightAz', u.az); s('lightEl', u.el); s('lightPow', u.pow); s('lightCol', u.col);
+      if ($('backdrop')) $('backdrop').value = u.bg;
+      state.backdrop = u.bg;
+    }
+    const cam = PRESET_CAMS[name];
+    if (cam) {
+      const s = (id, v) => { const el = $(id); if (el) el.value = v; };
+      s('camAz', cam.az); s('camEl', cam.el); s('camDist', cam.dist);
+      scene.setView(cam.az, cam.el, cam.dist);
+    }
+    state.lightPreset = name;
+    document.querySelectorAll('[data-preset]').forEach((b) => b.classList.toggle('on', b.dataset.preset === name));
+    _savePrefs();
+  };
+  document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => _applyPreset(b.dataset.preset)));
+  $('backdrop').addEventListener('change', (e) => {
+    if (!scene) return;
+    scene.setBackdrop('0x' + e.target.value);
+    state.backdrop = e.target.value;
+    _savePrefs();
+  });
   ['fxContrast', 'fxBright', 'fxSat', 'fxBloom'].forEach((id) =>
     $(id).addEventListener('input', _applyFx));
   // settings drawer (right-top ⚙)
@@ -342,6 +401,9 @@ function _wireUI() {
     const set = (id, v) => { const el = $(id); if (el) el.value = v; };
     set('lightAz', 323); set('lightEl', 52); set('lightPow', 150); set('lightCol', '#fff2df');
     applyLight();
+    state.lightPreset = '';
+    document.querySelectorAll('[data-preset]').forEach((b) => b.classList.remove('on'));
+    _savePrefs();
     toast('光影已还原默认', 'ok');
   });
   // export ALL settings (incl. mirror position) to a JSON file for cloud backup
