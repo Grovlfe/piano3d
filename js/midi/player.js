@@ -101,10 +101,10 @@ export class MidiPlayer {
         this.pos++;
       }
       // stuck-note watchdog: a noteOn without noteOff (bad MIDI, violent
-      // glissandi, quick pedal flips) is force-released after 20 s so a note
+      // glissandi, quick pedal flips) is force-released after 8 s so a note
       // can NEVER ring on forever. Rapid real playing never reaches this.
       for (const [n, t] of this._pressT) {
-        if (this.sec - t > 20) {
+        if (this.sec - t > 8) {
           this.engine.noteOff(n);
           if (this.visual) this.visual.keyUp(n);
           this._pressT.delete(n);
@@ -143,10 +143,17 @@ export class MidiPlayer {
           this._active.set(k, c);
         }
       } else if (e.type === 'cc') {
-        if (e.cc === 64) this.engine.setSustain(e.val >= 64);
-        else if (e.cc === 66) this.engine.setSostenuto(e.val >= 64);
-        else if (e.cc === 67) this.engine.setSoft(e.val >= 64);
-        else if (e.cc === 123 || e.cc === 120) this.engine.allNotesOff();
+        if (e.cc === 64) {
+          this.engine.setSustain(e.val >= 64);
+          if (this.visual && this.visual.setPedal) this.visual.setPedal('sustain', e.val >= 64);
+        } else if (e.cc === 66) {
+          this.engine.setSostenuto(e.val >= 64);
+          if (this.visual && this.visual.setPedal) this.visual.setPedal('sostenuto', e.val >= 64);
+        } else if (e.cc === 67) {
+          this.engine.setSoft(e.val >= 64);
+          if (this.visual && this.visual.setPedal) this.visual.setPedal('soft', e.val >= 64);
+          if (this.visual && this.visual.setUnaCorda) this.visual.setUnaCorda(e.val >= 64);
+        } else if (e.cc === 123 || e.cc === 120) this.engine.allNotesOff();
       } else if (e.type === 'pb') {
         this.engine.setPitchBend(e.ch, (e.val - 8192) / 8192);
       }
