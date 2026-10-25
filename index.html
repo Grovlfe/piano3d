@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>3D 钢琴演奏台 · VSL Steinway D-274</title>
+<title>3DPiano-play</title>
 <style>
   :root{
     --bg:#0b0d10; --panel:#15181dcc; --panel-solid:#171a20; --line:#262b33;
@@ -21,6 +21,19 @@
   #logo{display:flex; align-items:center; gap:10px; padding:8px 14px;}
   #logo .t{font-size:15px; font-weight:600; letter-spacing:.5px;}
   #logo .s{font-size:11px; color:var(--dim); margin-top:2px;}
+  #logo .dev{font-size:11px; color:var(--acc); margin-top:3px; letter-spacing:.2px;}
+  #logo .dev b{color:#cfe4ff; font-weight:700;}
+  /* settings drawer (right edge, all adjustments inside) */
+  #settingsDrawer{position:fixed; top:0; right:0; bottom:0; width:360px; max-width:86vw; z-index:50;
+    background:var(--panel-solid); border-left:1px solid var(--line); overflow-y:auto;
+    transform:translateX(102%); transition:transform .28s cubic-bezier(.2,.7,.3,1);
+    box-shadow:-8px 0 30px rgba(0,0,0,.5); padding:0 12px 24px;}
+  #settingsDrawer.open{transform:translateX(0);}
+  #settingsDrawer .dhead{position:sticky; top:0; z-index:3; display:flex; align-items:center; justify-content:space-between;
+    padding:14px 2px 10px; background:var(--panel-solid); font-size:15px; font-weight:700; letter-spacing:.5px;
+    border-bottom:1px solid var(--line); margin-bottom:12px;}
+  #settingsDrawer .panel{margin-bottom:12px;}
+  #settingsDrawer .panel h3{margin-bottom:8px;}
   .chips{display:flex; gap:6px; flex-wrap:wrap;}
   .chip{display:flex; align-items:center; gap:6px; padding:5px 10px; border-radius:20px; background:#101318;
     border:1px solid var(--line); font-size:11.5px; color:var(--dim); white-space:nowrap;}
@@ -99,6 +112,7 @@
   /* F8 full UI hide/show */
   body.ui-hidden #topbar, body.ui-hidden #leftbar, body.ui-hidden #transport,
   body.ui-hidden #hint, body.ui-hidden #copyright{display:none !important;}
+  body.ui-hidden #settingsDrawer{transform:translateX(102%);}
   ::-webkit-scrollbar{width:12px;} ::-webkit-scrollbar-thumb{background:#3a434f; border-radius:6px;}
   .hide{display:none !important;}
 </style>
@@ -107,7 +121,7 @@
 <div id="glwrap"><canvas id="gl"></canvas></div>
 
 <div id="loading">
-  <div class="lt">🎹 3D 钢琴演奏台</div>
+  <div class="lt">🎹 3DPiano-play</div>
   <div class="ls" id="loadingSub">正在启动…</div>
   <div id="loadbar" class="bar"><div id="loadbarFill"></div></div>
 </div>
@@ -115,8 +129,9 @@
 <div id="topbar">
   <div class="panel" id="logo">
     <div>
-      <div class="t">3D 钢琴演奏台</div>
+      <div class="t">3DPiano-play</div>
       <div class="s">VSL Steinway D-274 · 88键 · 三踏板 · Web MIDI</div>
+      <div class="dev">开发者：<b>Grovlfe</b>（现名珂眠）｜ B站：<b>@Grovlfe</b> ｜ 邮箱：3787165824@qq.com</div>
     </div>
   </div>
   <div class="chips">
@@ -127,6 +142,7 @@
     <span class="chip">画质 <b id="stQuality">自动</b></span>
   </div>
   <div id="toptools">
+    <button id="btnSettings" class="mini" title="打开设置面板">⚙ 设置</button>
     <button id="btnExport" class="mini" title="下载全部设置 JSON（可存云盘/邮箱，跨设备恢复）">导出设置</button>
     <button id="btnImport" class="mini" title="上传设置 JSON 恢复全部数据">导入设置</button>
     <button id="btnHelp">帮助</button>
@@ -143,15 +159,16 @@
   </div>
 </div>
 
-<div id="rightbar">
+<div id="settingsDrawer">
+  <div class="dhead">设置 Settings <button id="btnSettingsClose" title="关闭设置">✕</button></div>
   <div class="panel sec">
     <h3>音源 Audio</h3>
     <div class="row"><span class="lbl">状态</span><span class="val" id="sfstatus">—</span></div>
     <div class="bar" id="sfbar"><div id="sfbarFill"></div></div>
-    <div class="row"><span class="lbl">音量</span><input type="range" id="vol" min="0" max="100" value="80" style="width:110px"></div>
-    <div class="row"><span class="lbl">混响</span><input type="range" id="rev" min="0" max="100" value="26" style="width:110px"></div>
+    <div class="row"><span class="lbl">音量</span><input type="range" id="vol" min="0" max="100" value="80" style="width:150px"></div>
+    <div class="row"><span class="lbl">混响</span><input type="range" id="rev" min="0" max="100" value="26" style="width:150px"></div>
     <div class="row"><span class="lbl">力度曲线</span>
-      <select id="velCurve" style="width:110px">
+      <select id="velCurve" style="width:150px">
         <option value="0">线性</option>
         <option value="1" selected>柔和</option>
         <option value="2">明亮</option>
@@ -181,9 +198,9 @@
   </div>
   <div class="panel sec">
     <h3>光照 Light</h3>
-    <div class="row"><span class="lbl">方向</span><input type="range" id="lightAz" min="0" max="360" value="323" style="width:110px"></div>
-    <div class="row"><span class="lbl">仰角</span><input type="range" id="lightEl" min="8" max="80" value="52" style="width:110px"></div>
-    <div class="row"><span class="lbl">强度</span><input type="range" id="lightPow" min="0" max="300" value="150" style="width:110px"></div>
+    <div class="row"><span class="lbl">方向</span><input type="range" id="lightAz" min="0" max="360" value="323" style="width:150px"></div>
+    <div class="row"><span class="lbl">仰角</span><input type="range" id="lightEl" min="8" max="80" value="52" style="width:150px"></div>
+    <div class="row"><span class="lbl">强度</span><input type="range" id="lightPow" min="0" max="300" value="150" style="width:150px"></div>
     <div class="row"><span class="lbl">颜色</span><input type="color" id="lightCol" value="#fff2df" style="width:40px;height:22px;border:none;background:none;padding:0"></div>
     <div class="row"><span class="lbl">默认</span><button id="lightReset" class="mini">还原光影默认</button></div>
     <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
@@ -192,9 +209,9 @@
   </div>
   <div class="panel sec">
     <h3>视角 View</h3>
-    <div class="row"><span class="lbl">水平</span><input type="range" id="camAz" min="0" max="360" value="0" style="width:110px"></div>
-    <div class="row"><span class="lbl">仰角</span><input type="range" id="camEl" min="-20" max="70" value="22" style="width:110px"></div>
-    <div class="row"><span class="lbl">距离</span><input type="range" id="camDist" min="120" max="600" value="260" style="width:110px"></div>
+    <div class="row"><span class="lbl">水平</span><input type="range" id="camAz" min="0" max="360" value="0" style="width:150px"></div>
+    <div class="row"><span class="lbl">仰角</span><input type="range" id="camEl" min="-20" max="70" value="22" style="width:150px"></div>
+    <div class="row"><span class="lbl">距离</span><input type="range" id="camDist" min="120" max="600" value="260" style="width:150px"></div>
     <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
       拖动滑条从任意角度观察钢琴（含琴身内部、琴键下方），实时生效并保存，重启自动恢复；右键拖拽旋转视角时滑条自动同步。
     </div>
@@ -208,10 +225,10 @@
   </div>
   <div class="panel sec">
     <h3>画面 Display</h3>
-    <div class="row"><span class="lbl">对比度</span><input type="range" id="fxContrast" min="50" max="160" value="100" style="width:110px"></div>
-    <div class="row"><span class="lbl">亮度</span><input type="range" id="fxBright" min="40" max="160" value="100" style="width:110px"></div>
-    <div class="row"><span class="lbl">饱和度</span><input type="range" id="fxSat" min="0" max="200" value="100" style="width:110px"></div>
-    <div class="row"><span class="lbl">泛光</span><input type="range" id="fxBloom" min="0" max="150" value="0" style="width:110px"></div>
+    <div class="row"><span class="lbl">对比度</span><input type="range" id="fxContrast" min="50" max="160" value="100" style="width:150px"></div>
+    <div class="row"><span class="lbl">亮度</span><input type="range" id="fxBright" min="40" max="160" value="100" style="width:150px"></div>
+    <div class="row"><span class="lbl">饱和度</span><input type="range" id="fxSat" min="0" max="200" value="100" style="width:150px"></div>
+    <div class="row"><span class="lbl">泛光</span><input type="range" id="fxBloom" min="0" max="150" value="0" style="width:150px"></div>
     <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
       滤镜与泛光实时生效并自动保存；按 <b>F8</b> 隐藏/显示全部界面。
     </div>
@@ -257,7 +274,7 @@
 </div>
 
 <div id="hint">鼠标/触摸：点击琴键发声，按住横向滑动 = 刮奏；滚轮缩放，右键/拖拽旋转视角</div>
-<div id="copyright"><b>开发者：Grovlfe（现名珂眠）</b> ｜ 联系邮箱：3787165824@qq.com</div>
+<div id="copyright"><b>开发者：Grovlfe（现名珂眠）</b> ｜ B站：@Grovlfe ｜ 联系邮箱：3787165824@qq.com</div>
 <div id="toasts"></div>
 
 <div id="errScreen"><div class="box" id="errBox"></div></div>
