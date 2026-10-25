@@ -217,30 +217,44 @@ export class PianoScene {
       // 12 same-origin chunks (the repo cannot hold the 55 MB GLB via the
       // Contents API, so it ships split; same-origin fetch is CORS-free).
       // Note: jsDelivr rejects the chunk filenames, so keep these on Pages.
+      // Each chunk gets a 40 s timeout + 3 retries, and chunks download in
+      // batches of 6 — a stalled request can never hang the whole piano.
       const CHUNKS = 12;
-      Promise.all(
-        Array.from({ length: CHUNKS }, (_, i) =>
-          fetch('assets/piano.glb.' + String(i).padStart(2, '0'))
-            .then((r) => {
-              if (!r.ok) throw new Error('chunk ' + i + ' http ' + r.status);
-              return r.arrayBuffer();
-            })
-            .then((b) => {
-              if (onProgress) onProgress((i + 1) / CHUNKS);
-              return b;
-            })
-        )
-      ).then((bufs) => {
-        const total = bufs.reduce((s, b) => s + b.byteLength, 0);
+      const loadChunk = async (i) => {
+        for (let a = 0; a < 3; a++) {
+          const ctrl = new AbortController();
+          const tm = setTimeout(() => ctrl.abort(), 40000);
+          try {
+            const r = await fetch('assets/piano.glb.' + String(i).padStart(2, '0'), { signal: ctrl.signal });
+            clearTimeout(tm);
+            if (!r.ok) throw new Error('chunk ' + i + ' http ' + r.status);
+            const b = await r.arrayBuffer();
+            if (onProgress) onProgress((i + 1) / CHUNKS);
+            return b;
+          } catch (e) {
+            clearTimeout(tm);
+            if (a === 2) throw e;
+          }
+        }
+      };
+      (async () => {
+        const bufs = [];
+        for (let b = 0; b < CHUNKS; b += 6) {
+          const part = await Promise.all(
+            Array.from({ length: Math.min(6, CHUNKS - b) }, (_, k) => loadChunk(b + k))
+          );
+          bufs.push(...part);
+        }
+        const total = bufs.reduce((s, x) => s + x.byteLength, 0);
         const merged = new Uint8Array(total);
         let off = 0;
-        for (const b of bufs) {
-          merged.set(new Uint8Array(b), off);
-          off += b.byteLength;
+        for (const x of bufs) {
+          merged.set(new Uint8Array(x), off);
+          off += x.byteLength;
         }
         const objUrl = URL.createObjectURL(new Blob([merged], { type: 'model/gltf-binary' }));
         loader.load(objUrl, finish, undefined, onErr);
-      }).catch(onErr);
+      })().catch(onErr);
     } else {
       loader.load(url, finish, (ev) => {
         if (onProgress) onProgress(ev.loaded / ev.total);
