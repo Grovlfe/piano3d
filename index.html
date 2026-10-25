@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D 钢琴演奏台 · VSL Steinway D-274</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#15181dcc; --panel-solid:#171a20; --line:#262b33;
+    --text:#d7dde4; --dim:#8b95a1; --acc:#4da3ff; --ok:#3ecf8e; --warn:#ffb648; --err:#ff5c5c;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; user-select:none;}
+  html,body{width:100%; height:100%; overflow:hidden; background:var(--bg); color:var(--text);
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif; font-size:13px;}
+  #glwrap{position:fixed; inset:0;}
+  #gl{width:100%; height:100%; display:block; outline:none;}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    backdrop-filter:blur(8px); box-shadow:0 4px 18px rgba(0,0,0,.45);}
+  #topbar{position:fixed; top:12px; left:12px; right:12px; display:flex; align-items:center; gap:10px; z-index:20; pointer-events:none;}
+  #topbar>*{pointer-events:auto;}
+  #logo{display:flex; align-items:center; gap:10px; padding:8px 14px;}
+  #logo .t{font-size:15px; font-weight:600; letter-spacing:.5px;}
+  #logo .s{font-size:11px; color:var(--dim); margin-top:2px;}
+  .chips{display:flex; gap:6px; flex-wrap:wrap;}
+  .chip{display:flex; align-items:center; gap:6px; padding:5px 10px; border-radius:20px; background:#101318;
+    border:1px solid var(--line); font-size:11.5px; color:var(--dim); white-space:nowrap;}
+  .chip b{color:var(--text); font-weight:600;}
+  .dot{width:7px; height:7px; border-radius:50%; background:#555;}
+  .dot.on{background:var(--ok); box-shadow:0 0 6px var(--ok);}
+  .dot.warn{background:var(--warn); box-shadow:0 0 6px var(--warn);}
+  .dot.err{background:var(--err); box-shadow:0 0 6px var(--err);}
+  #toptools{margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;}
+  button{background:#1c2128; color:var(--text); border:1px solid var(--line); border-radius:7px;
+    padding:6px 12px; font-size:12.5px; cursor:pointer; transition:.15s;}
+  button.mini{padding:4px 10px; font-size:11px}
+  button.on{background:#2c5f3a; border-color:#3f8a52}
+  button:hover{background:#242b34; border-color:#3a424e;}
+  button:active{transform:translateY(1px);}
+  button.acc{background:#1c4c80; border-color:#2f6cb0;}
+  button.acc:hover{background:#235d9c;}
+  select{background:#1c2128; color:var(--text); border:1px solid var(--line); border-radius:7px; padding:6px 8px; font-size:12.5px;}
+  #rightbar{position:fixed; right:12px; top:64px; width:238px; z-index:20; display:flex; flex-direction:column; gap:10px; pointer-events:none; max-height:calc(100vh - 92px); overflow-y:auto;}
+  #rightbar>*{pointer-events:auto;}
+  .sec{padding:10px 12px;}
+  .sec h3{font-size:12px; color:var(--dim); font-weight:600; margin-bottom:8px; letter-spacing:1px; text-transform:uppercase;}
+  .row{display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0;}
+  .row .lbl{color:var(--dim); font-size:12px;}
+  .row .val{font-size:12px; text-align:right;}
+  .bar{height:5px; background:#232830; border-radius:3px; overflow:hidden; margin:6px 0;}
+  .bar>div{height:100%; width:0%; background:linear-gradient(90deg,#2f7fd0,#5ab2ff); transition:width .2s;}
+  #sfstatus{font-size:11.5px; color:var(--dim); line-height:1.5; word-break:break-all;}
+  .pedals{display:flex; gap:8px; justify-content:space-between; margin-top:4px;}
+  .pedal{flex:1; text-align:center; padding:7px 4px; border-radius:8px; background:#101318; border:1px solid var(--line); cursor:pointer; transition:.15s;}
+  .pedal .pname{font-size:10.5px; color:var(--dim); display:block; margin-top:3px;}
+  .pedal .picon{font-size:16px; line-height:1;}
+  .pedal.down{border-color:var(--acc); background:#13263c; box-shadow:0 0 10px #2f7fd044;}
+  .pedal.down .pname{color:var(--acc);}
+  #fps{font-variant-numeric:tabular-nums;}
+  #leftbar{position:fixed; left:12px; bottom:86px; width:238px; z-index:20; display:flex; flex-direction:column; gap:10px; pointer-events:none; max-height:calc(100vh - 150px); overflow-y:auto;}
+  #leftbar>*{pointer-events:auto;}
+  #leftbar>*{pointer-events:auto;}
+  #playlist{max-height:150px; overflow-y:auto;}
+  #playlist .item{padding:5px 8px; border-radius:6px; cursor:pointer; font-size:12px; color:var(--dim);
+    display:flex; gap:6px; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #playlist .item:hover{background:#1d232b;}
+  #playlist .item.cur{background:#13263c; color:var(--text);}
+  #playlist .item .i{width:4px; height:14px; border-radius:2px; background:#333; flex:none;}
+  #playlist .item.cur .i{background:var(--acc);}
+  #transport{position:fixed; left:12px; right:12px; bottom:12px; z-index:20; display:flex; gap:12px; align-items:center; padding:10px 14px; pointer-events:none;}
+  #transport>*{pointer-events:auto;}
+  #playbtn{width:44px; height:44px; border-radius:50%; font-size:17px; background:#1c4c80; border:1px solid #2f6cb0; flex:none;}
+  #playbtn:hover{background:#235d9c;}
+  #tinfo{min-width:220px; font-size:12px; color:var(--dim); line-height:1.5;}
+  #tinfo b{color:var(--text);}
+  #progressWrap{flex:1; cursor:pointer;}
+  #prog{height:6px;}
+  #timelabel{font-size:11.5px; color:var(--dim); width:88px; text-align:center; font-variant-numeric:tabular-nums;}
+  .kv{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+  .kv label{font-size:11.5px; color:var(--dim);}
+  #toasts{position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:100; display:flex; flex-direction:column; gap:6px; align-items:center; pointer-events:none;}
+  .toast{background:#1a1f26ee; border:1px solid var(--line); border-radius:8px; padding:8px 14px; font-size:12.5px; max-width:560px;
+    box-shadow:0 4px 16px rgba(0,0,0,.5); animation:tin .2s ease;}
+  .toast.warn{border-color:var(--warn); color:#ffd9a0;}
+  .toast.err{border-color:var(--err); color:#ffb3b3;}
+  .toast.ok{border-color:var(--ok); color:#b7f0d5;}
+  @keyframes tin{from{opacity:0; transform:translateY(-6px);}to{opacity:1; transform:none;}}
+  #loading{position:fixed; inset:0; z-index:200; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; background:radial-gradient(1200px 600px at 50% 30%, #10151c, #08090b);}
+  #loading .lt{font-size:22px; font-weight:600; letter-spacing:2px;}
+  #loading .ls{font-size:12.5px; color:var(--dim);}
+  #loadbar{width:320px; height:5px;}
+  #loading.hide{display:none;}
+  #errScreen{position:fixed; inset:0; z-index:300; display:none; align-items:center; justify-content:center; background:#08090b; padding:30px;}
+  #errScreen .box{max-width:560px; text-align:center; line-height:1.8; color:var(--dim);}
+  #hint{position:fixed; left:50%; bottom:88px; transform:translateX(-50%); z-index:15; font-size:11.5px; color:#5c6670;
+    background:rgba(10,12,15,.55); padding:4px 12px; border-radius:14px; white-space:nowrap;}
+  #copyright{position:fixed; right:14px; bottom:60px; z-index:15; font-size:11px; color:#46505c; pointer-events:none;}
+  ::-webkit-scrollbar{width:12px;} ::-webkit-scrollbar-thumb{background:#3a434f; border-radius:6px;}
+  .hide{display:none !important;}
+</style>
+</head>
+<body>
+<div id="glwrap"><canvas id="gl"></canvas></div>
+
+<div id="loading">
+  <div class="lt">🎹 3D 钢琴演奏台</div>
+  <div class="ls" id="loadingSub">正在启动…</div>
+  <div id="loadbar" class="bar"><div id="loadbarFill"></div></div>
+</div>
+
+<div id="topbar">
+  <div class="panel" id="logo">
+    <div>
+      <div class="t">3D 钢琴演奏台</div>
+      <div class="s">VSL Steinway D-274 · 88键 · 三踏板 · Web MIDI</div>
+    </div>
+  </div>
+  <div class="chips">
+    <span class="chip"><span class="dot" id="dotModel"></span>模型 <b id="stModel">加载中</b></span>
+    <span class="chip"><span class="dot" id="dotSf"></span>音源 <b id="stSf">未加载</b></span>
+    <span class="chip"><span class="dot" id="dotMidi"></span>MIDI <b id="stMidi">未连接</b></span>
+    <span class="chip">FPS <b id="fps">--</b></span>
+    <span class="chip">画质 <b id="stQuality">自动</b></span>
+  </div>
+  <div id="toptools">
+    <button id="btnHelp">帮助</button>
+    <select id="qualitySel">
+      <option value="auto" selected>画质：自动</option>
+      <option value="ultra">画质：极致</option>
+      <option value="high">画质：高</option>
+      <option value="medium">画质：中</option>
+      <option value="low">画质：低</option>
+    </select>
+    <button id="btnSfImport">导入 SF2 音源</button>
+    <button id="btnMidiFile">导入 MIDI 文件</button>
+    <button id="btnMidiFolder">导入 MIDI 文件夹</button>
+  </div>
+</div>
+
+<div id="rightbar">
+  <div class="panel sec">
+    <h3>音源 Audio</h3>
+    <div class="row"><span class="lbl">状态</span><span class="val" id="sfstatus">—</span></div>
+    <div class="bar" id="sfbar"><div id="sfbarFill"></div></div>
+    <div class="row"><span class="lbl">音量</span><input type="range" id="vol" min="0" max="100" value="80" style="width:110px"></div>
+    <div class="row"><span class="lbl">混响</span><input type="range" id="rev" min="0" max="100" value="26" style="width:110px"></div>
+    <div class="row"><span class="lbl">力度曲线</span>
+      <select id="velCurve" style="width:110px">
+        <option value="0">线性</option>
+        <option value="1" selected>柔和</option>
+        <option value="2">明亮</option>
+      </select>
+    </div>
+  </div>
+  <div class="panel sec">
+    <h3>MIDI 设备</h3>
+    <div class="row"><span class="lbl">输入设备</span><select id="midiSel" style="width:150px"><option value="">— 无设备 —</option></select></div>
+    <div class="row" style="margin-top:8px">
+      <button id="btnMidiReconnect" style="flex:1">重新检测</button>
+    </div>
+    <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
+      外接 MIDI 键盘 / 音序器即插即用。力度 0-127，CC64 延音、CC66 持续、CC67 柔音。
+    </div>
+  </div>
+  <div class="panel sec">
+    <h3>踏板</h3>
+    <div class="pedals">
+      <div class="pedal" id="pedSoft"><span class="picon">◀</span><span class="pname">柔音</span></div>
+      <div class="pedal" id="pedSost"><span class="picon">◈</span><span class="pname">持续</span></div>
+      <div class="pedal" id="pedSus"><span class="picon">▶</span><span class="pname">延音</span></div>
+    </div>
+    <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:8px">
+      点击可切换（无外设时测试用）。柔音踏板：键盘整体左移并柔化音色。
+    </div>
+  </div>
+  <div class="panel sec">
+    <h3>光照 Light</h3>
+    <div class="row"><span class="lbl">方向</span><input type="range" id="lightAz" min="0" max="360" value="323" style="width:110px"></div>
+    <div class="row"><span class="lbl">仰角</span><input type="range" id="lightEl" min="8" max="80" value="52" style="width:110px"></div>
+    <div class="row"><span class="lbl">强度</span><input type="range" id="lightPow" min="0" max="300" value="150" style="width:110px"></div>
+    <div class="row"><span class="lbl">颜色</span><input type="color" id="lightCol" value="#fff2df" style="width:40px;height:22px;border:none;background:none;padding:0"></div>
+    <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
+      调整主光源的方位、仰角、强度与色温，实时影响琴身与琴键光影。
+    </div>
+  </div>
+  <div class="panel sec">
+    <h3>视角 View</h3>
+    <div class="row"><span class="lbl">水平</span><input type="range" id="camAz" min="0" max="360" value="0" style="width:110px"></div>
+    <div class="row"><span class="lbl">仰角</span><input type="range" id="camEl" min="-20" max="70" value="22" style="width:110px"></div>
+    <div class="row"><span class="lbl">距离</span><input type="range" id="camDist" min="120" max="600" value="260" style="width:110px"></div>
+    <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
+      拖动滑条从任意角度观察钢琴（含琴身内部、琴键下方），实时生效并保存，重启自动恢复；右键拖拽旋转视角时滑条自动同步。
+    </div>
+  </div>
+  <div class="panel sec">
+    <h3>镜面 Mirror</h3>
+    <div class="row"><span class="lbl">调整位置</span><button id="mirrorEditBtn" class="mini">开启编辑</button></div>
+    <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
+      开启后画面出现红/绿/蓝箭头，拖动即可移动镜面位置，位置自动保存；再次点击关闭编辑。
+    </div>
+  </div>
+</div>
+
+<div id="leftbar">
+  <div class="panel sec">
+    <h3>曲目列表 <span id="songCount" style="color:var(--dim)"></span></h3>
+    <div id="playlist"></div>
+  </div>
+  <div class="panel sec">
+    <h3>演奏设置</h3>
+    <div class="row"><span class="lbl">八度</span>
+      <div class="kv"><button id="octDown">−</button><span id="octLabel" style="width:34px;text-align:center">C4</span><button id="octUp">+</button></div>
+    </div>
+    <div style="font-size:11px; color:var(--dim); line-height:1.6">
+      电脑键盘：<b>Z X C V B N M</b> 等为白键，<b>S D G H J</b> 等为黑键；<b>Q…P</b> 高八度。
+      按住并横向滑动 = 刮奏。
+    </div>
+  </div>
+</div>
+
+<div id="transport" class="panel">
+  <button id="playbtn" title="播放/暂停">▶</button>
+  <div id="tinfo">
+    <div style="font-size:13px; color:var(--text)" id="tname">未加载曲目</div>
+    <div id="tmeta" style="font-size:11px">—</div>
+  </div>
+  <div id="progressWrap"><div id="prog" class="bar"><div id="progFill"></div></div></div>
+  <div id="timelabel">00:00 / 00:00</div>
+  <div class="kv">
+    <label>速度</label>
+    <select id="tempo" style="width:64px">
+      <option value="0.5">0.5×</option>
+      <option value="0.75">0.75×</option>
+      <option value="1" selected>1×</option>
+      <option value="1.25">1.25×</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2×</option>
+    </select>
+  </div>
+</div>
+
+<div id="hint">鼠标/触摸：点击琴键发声，按住横向滑动 = 刮奏；滚轮缩放，右键/拖拽旋转视角</div>
+<div id="copyright">开发者：珂眠 ｜ 联系邮箱：3787165824@qq.com</div>
+<div id="toasts"></div>
+
+<div id="errScreen"><div class="box" id="errBox"></div></div>
+
+<input type="file" id="sfPicker" accept=".sf2,.sf3" style="display:none" multiple>
+<input type="file" id="midiPicker" accept=".mid,.midi,.kar,.rmi" style="display:none" multiple>
+<input type="file" id="folderPicker" webkitdirectory style="display:none">
+
+<script type="importmap">
+{ "imports": {
+    "three": "./js/three/three.module.min.js",
+    "three/addons/": "./js/three/addons/"
+} }
+</script>
+<script type="module" src="./js/app.js?v=60"></script>
+</body>
+</html>
