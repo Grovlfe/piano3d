@@ -692,7 +692,11 @@ function onPointerDown( event ) {
 
 	if ( ! document.pointerLockElement ) {
 
-		this.domElement.setPointerCapture( event.pointerId );
+		try {
+						if ( ! this.domElement.hasPointerCapture( event.pointerId ) ) {
+							this.domElement.setPointerCapture( event.pointerId );
+						}
+					} catch ( err ) { /* ignore capture failures */ }
 
 	}
 
