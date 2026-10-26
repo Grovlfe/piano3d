@@ -1,6 +1,6 @@
 // scene.js — 3D 场景：原模型琴键（运行时拆分）+ 竖直物理按压动画 + 三踏板原位互动 + 镜面衰减反射 + 自适应画质
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=51';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js?v=52';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js?v=51';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js?v=51';
 import { Reflector } from 'three/addons/objects/Reflector.js?v=56';
@@ -57,10 +57,10 @@ export class PianoScene {
     this.controls.minDistance = 0.4;
     this.controls.maxDistance = 12;
     this.controls.target.set(0, 0.1, 0);
-    // 2026-10-26: right-drag rotate & wheel zoom removed (FPS walk / sliders /
-    // native scrollbar take over). Wheel now scrolls the page UI as requested.
-    this.controls.enableRotate = false;
-    this.controls.enableZoom = false;
+    // Camera view mode: wheel = zoom distance, drag = orbit (restored per user).
+    // FPS walk mode flips these off so wheel scrolls the page UI instead.
+    this.controls.enableRotate = true;
+    this.controls.enableZoom = true;
     this.controls.enablePan = false;
 
     // lights
@@ -636,7 +636,11 @@ export class PianoScene {
     this._ptrs = new Map(); // pointerId -> current note (-1 = none)
     el.addEventListener('pointerdown', (e) => {
       if (this._fp && this._fp.aim) return; // aim mode uses center crosshair instead
-      try { el.setPointerCapture(e.pointerId); } catch (err) { /* synthetic or non-capturable pointer */ }
+      try {
+        if (e.pointerId != null && el.hasPointerCapture && !el.hasPointerCapture(e.pointerId)) {
+          el.setPointerCapture(e.pointerId);
+        }
+      } catch (err) { /* synthetic or non-capturable pointer */ }
       this._ptrs.set(e.pointerId, -1);
       this._hit(e);
     });
@@ -796,6 +800,16 @@ export class PianoScene {
     this.camera.fov = this._fp.fov;
     this.camera.updateProjectionMatrix();
   }
+  // reset mirror to factory position/rotation (user: 位置复位)
+  resetMirror() {
+    const m = this.getMirror();
+    if (!m) return false;
+    if (this._mirrorDefault) m.position.copy(this._mirrorDefault);
+    m.rotation.set(0, 0, 0);
+    try { localStorage.removeItem('piano3d_mirror_v2'); } catch (e) {}
+    if (this._fp && this._fp.active) { /* keep fps state */ }
+    return true;
+  }
   getFpsState() { return this._fp; }
   enterFps() {
     if (!this._fp) this.initFps();
@@ -803,7 +817,7 @@ export class PianoScene {
     this._fp.active = true;
     this._fp.seated = false;
     this._fp.eye = this._fp.crouch ? 0.82 : 1.62;
-    if (this.controls) this.controls.enabled = false;
+    if (this.controls) { this.controls.enabled = false; this.controls.enableRotate = false; this.controls.enableZoom = false; }
     this._applyFpsCam();
   }
   // Sit down on the bench: allowed only when close to the piano (in front, beside keys).
@@ -818,7 +832,7 @@ export class PianoScene {
     f.x = 0; f.z = 1.25;
     this._fp.active = false;
     this._fp.seated = true;
-    if (this.controls) this.controls.enabled = true;
+    if (this.controls) { this.controls.enabled = true; this.controls.enableRotate = true; this.controls.enableZoom = true; }
     this.setView(this._camAz, this._camEl, this._camDist);
     return 'ok';
   }
@@ -826,7 +840,7 @@ export class PianoScene {
     if (!this._fp) return;
     this._fp.active = false;
     this._fp.seated = true;
-    if (this.controls) this.controls.enabled = true;
+    if (this.controls) { this.controls.enabled = true; this.controls.enableRotate = true; this.controls.enableZoom = true; }
     // return to the seated playing view (user sliders)
     this.setView(this._camAz, this._camEl, this._camDist);
   }
@@ -937,8 +951,7 @@ export class PianoScene {
   }
   applyMirrorOffset(dx, dy, dz) {
     const m = this.getMirror();
-    if (!m || !this._mirrorDefault) return;
-    m.position.set(this._mirrorDefault.x + dx, this._mirrorDefault.y + dy, this._mirrorDefault.z + dz);
+    if (!m || !this._mirrorDefault) return;    m.position.set(this._mirrorDefault.x + dx, this._mirrorDefault.y + dy, this._mirrorDefault.z + dz);
   }
 
   // ---------- user light control ----------
