@@ -1,6 +1,6 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
-import { PianoScene } from './scene.js?v=81';
+import { PianoScene } from './scene.js?v=82';
 import { Sampler } from './audio/sampler.js?v=64';
 import { MidiDevice } from './midi/device.js?v=57';
 import { MidiPlayer } from './midi/player.js?v=58';
@@ -159,6 +159,7 @@ function _savePrefs() {
     transpose: state.transpose,
     lightPreset: state.lightPreset || '',
     backdrop: state.backdrop || '',
+    fov: ($('fov') ? $('fov').value : 42),
   };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* storage unavailable */ }
   // cloud mirror: the URL itself carries the settings — open this link on any
@@ -185,6 +186,11 @@ function _loadPrefs() {
   set('lightCol', p.lightCol); set('qualitySel', p.quality);
   set('backdrop', p.backdrop);
   set('camAz', p.camAz); set('camEl', p.camEl); set('camDist', p.camDist);
+  set('fov', p.fov);
+  if (scene) {
+    scene.setFov(+($('fov').value || 42));
+    scene.setView(+$('camAz').value, +$('camEl').value, +$('camDist').value / 100);
+  }
   set('fxContrast', p.fxContrast); set('fxBright', p.fxBright);
   set('fxSat', p.fxSat); set('fxBloom', p.fxBloom);
   if (p.octave !== undefined) state.octave = Math.max(-2, Math.min(2, +p.octave || 0));
@@ -349,7 +355,8 @@ function _wireUI() {
   const PRESET_CAMS = {
     ref:   { az: 0,   el: 10, dist: 1.35 },
     stage: { az: 0,   el: 24, dist: 2.4 },
-    cool:  { az: 35,  el: 18, dist: 2.8 }
+    cool:  { az: 35,  el: 18, dist: 2.8 },
+    hall:  { az: 0,   el: 12, dist: 2.0 }
   };
   const _applyPreset = (name) => {
     if (!scene) return;
@@ -359,6 +366,7 @@ function _wireUI() {
       ref:   { az: 7,   el: 83, pow: 200, col: '#fff6e8', bg: '07080b' },
       stage: { az: 314, el: 72, pow: 190, col: '#ffeed9', bg: '040507' },
       cool:  { az: 34,  el: 43, pow: 95,  col: '#dfe9ff', bg: '14171c' },
+      hall:  { az: 349, el: 77, pow: 220, col: '#ffe9c4', bg: '0b0c10' },
       default:{ az: 323, el: 52, pow: 150, col: '#fff2df', bg: '232e40' }
     };
     const u = LP_UI[name];
@@ -458,6 +466,7 @@ function _wireUI() {
   $('camAz').addEventListener('input', applyView);
   $('camEl').addEventListener('input', applyView);
   $('camDist').addEventListener('input', applyView);
+  $('fov').addEventListener('input', (e) => { scene.setFov(+e.target.value); _savePrefs(); });
 
   // ---------- mirror position editor (drag red/green/blue arrows) ----------
   // Hidden by default for aesthetics; user turns it on in 设置 → 镜面 Mirror.
@@ -665,6 +674,19 @@ function _wireUI() {
     // octave shift (before note mapping so - / = work)
     if (e.key === '-') { state.octave = Math.max(-2, state.octave - 1); _oct(); return; }
     if (e.key === '=') { state.octave = Math.min(2, state.octave + 1); _oct(); return; }
+    // ---- FPS first-person: WASD / jump / crouch / sit / aim ----
+    const fp = scene && scene.getFpsState ? scene.getFpsState() : null;
+    if (e.key === 'f') {
+      if (fp && fp.active) { scene.exitFps(); toast('已坐下演奏（按 F 站起漫游）', 'ok'); }
+      else { scene.enterFps(); toast('漫游：WASD 移动 · 空格跳 · C 蹲 · F 坐下 · ~ 准星', 'ok'); }
+      return;
+    }
+    if (e.key === '`' || e.key === '~') { _toggleAim(); return; }
+    if (fp && fp.active) {
+      if (k === 'w' || k === 'a' || k === 's' || k === 'd') { scene.fpsKey(k, true); e.preventDefault(); return; }
+      if (e.key === ' ') { scene.fpsJump(); return; }
+      if (k === 'c') { scene.fpsCrouch(true); return; }
+    }
     let off = null;
     if (k in LOW_W) off = LOW_W[k];
     else if (k in LOW_B) off = LOW_B[k];
@@ -681,6 +703,11 @@ function _wireUI() {
   });
   window.addEventListener('keyup', (e) => {
     const k = e.key.toLowerCase();
+    const fp = scene && scene.getFpsState ? scene.getFpsState() : null;
+    if (fp && fp.active) {
+      if (k === 'w' || k === 'a' || k === 's' || k === 'd') { scene.fpsKey(k, false); return; }
+      if (k === 'c') { scene.fpsCrouch(false); return; }
+    }
     let off = null;
     if (k in LOW_W) off = LOW_W[k];
     else if (k in LOW_B) off = LOW_B[k];
@@ -692,6 +719,40 @@ function _wireUI() {
     kbd.delete(k);
     engine.noteOff(note);
     scene && scene.keyUp(note);
+  });
+
+  // ---- aim mode (~): crosshair + pointer-lock mouse look + click-to-play ----
+  let _aimActive = false, _aimNote = null;
+  const _toggleAim = () => {
+    _aimActive = scene.toggleAim();
+    const c = document.getElementById('crosshair'); if (c) c.classList.toggle('on', _aimActive);
+    const h = document.getElementById('aimHint'); if (h) h.classList.toggle('on', _aimActive);
+    toast(_aimActive ? '准星模式：鼠标移动转视角，左键点击准星所指琴键弹奏' : '准星已关闭', _aimActive ? 'ok' : '');
+  };
+  const canvas = $('gl');
+  canvas.addEventListener('click', () => {
+    const fp = scene && scene.getFpsState ? scene.getFpsState() : null;
+    if (fp && (fp.active || fp.aim) && document.pointerLockElement !== canvas) {
+      try {
+        const r = canvas.requestPointerLock();
+        if (r && typeof r.catch === 'function') r.catch(() => {});
+      } catch (err) {}
+    }
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (document.pointerLockElement === canvas && scene && scene.fpsTurn) {
+      scene.fpsTurn(e.movementX || 0, e.movementY || 0);
+    }
+  });
+  canvas.addEventListener('mousedown', () => {
+    const fp = scene && scene.getFpsState ? scene.getFpsState() : null;
+    if (fp && fp.aim && document.pointerLockElement === canvas) {
+      const note = scene.aimPick();
+      if (note != null) { _aimNote = note; engine.noteOn(note, 88); scene.keyDown(note, 88); }
+    }
+  });
+  window.addEventListener('mouseup', () => {
+    if (_aimNote != null) { engine.noteOff(_aimNote); scene.keyUp(_aimNote); _aimNote = null; }
   });
 
   // self-test
