@@ -53,7 +53,7 @@ export class Sampler {
 
     // reverb
     this.reverb = this.ctx.createConvolver();
-    this.reverb.buffer = this._makeImpulse(2.6, 2.2);
+    this.reverb.buffer = this._makeImpulse(3.4, 1.7);
     this.reverbGain = this.ctx.createGain();
     this.reverbGain.gain.value = this.reverbSend;
     this.reverb.connect(this.reverbGain);
@@ -241,7 +241,7 @@ export class Sampler {
       use = [best];
     }
     if (use.length > 2) use = [use[0], use[use.length - 1]];
-    const pan = (note - NOTE0) / (NOTE1 - NOTE0) * 1.3 - 0.65;
+    const pan = (note - NOTE0) / (NOTE1 - NOTE0) * 1.5 - 0.75 + (Math.random() * 0.05 - 0.025);
     for (const l of use) {
       const rate = l.rate || this.ctx.sampleRate;
       this._spawnVoice(note, l.buffer, l, vel, gVel, pan, opts, now, rate);
@@ -274,7 +274,9 @@ export class Sampler {
     }
     if (use.length > 2) use = [use[0], use[use.length - 1]];
 
-    const pan = (note - NOTE0) / (NOTE1 - NOTE0) * 1.3 - 0.65;
+    // wide, natural stereo field: low keys left, high keys right (player view),
+    // plus a tiny per-note randomization so chords bloom instead of pin-pointing
+    const pan = (note - NOTE0) / (NOTE1 - NOTE0) * 1.5 - 0.75 + (Math.random() * 0.05 - 0.025);
 
     const bufs = await Promise.all(use.map(l => this._getBuffer(l.f).catch(() => null)));
     if (this._dead) return;
