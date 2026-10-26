@@ -267,9 +267,26 @@
   </div>
   <div class="panel sec">
     <h3>镜面 Mirror</h3>
-    <div class="row"><span class="lbl">调整位置</span><button id="mirrorEditBtn" class="mini">开启编辑</button></div>
+    <div class="row"><span class="lbl">编辑模式</span><button id="mirrorEditBtn" class="mini">开启编辑</button></div>
+    <div class="row"><span class="lbl">箭头模式</span><button id="mirrorModeBtn" class="mini">平移</button></div>
+    <div class="row"><span class="lbl">旋转X</span><input type="range" id="mirRotX" min="-180" max="180" value="0" style="width:150px"></div>
+    <div class="row"><span class="lbl">旋转Y</span><input type="range" id="mirRotY" min="-180" max="180" value="0" style="width:150px"></div>
+    <div class="row"><span class="lbl">旋转Z</span><input type="range" id="mirRotZ" min="-180" max="180" value="0" style="width:150px"></div>
+    <div class="row"><span class="lbl">精确角度</span><input type="number" id="mirRotNum" min="-180" max="180" step="0.1" value="0" style="width:80px;background:#1a212b;color:#dfe6ee;border:1px solid #2e3947;border-radius:6px;padding:3px 6px"></div>
     <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
-      开启后画面出现红/绿/蓝箭头，拖动即可移动镜面位置，位置自动保存；再次点击关闭编辑。
+      开启编辑后：箭头模式「平移」= 拖动红/绿/蓝箭头移动镜面位置；「旋转」= 拖动角度环旋转镜面（X/Y/Z 三轴），或直接拖下面的旋转滑块/输入精确角度。全部实时保存，重启有效。
+    </div>
+  </div>
+  <div class="panel sec">
+    <h3>视角模式 View Mode</h3>
+    <div class="row"><span class="lbl">模式</span>
+      <select id="viewMode" style="background:#1a212b;color:#dfe6ee;border:1px solid #2e3947;border-radius:6px;padding:4px 8px">
+        <option value="seated">坐姿演奏（相机视角）</option>
+        <option value="fps">第一人称漫游（游戏移动）</option>
+      </select>
+    </div>
+    <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
+      坐姿演奏 = 滑块控制相机视角直接弹奏；第一人称漫游 = WASD 移动·空格跳·C 蹲·F 坐下·~ 准星。随时按 F 也可在两种模式间切换。
     </div>
   </div>
   <div class="panel sec">
@@ -366,6 +383,6 @@
     });
   }
 </script>
-<script type="module" src="./js/app.js?v=68"></script>
+<script type="module" src="./js/app.js?v=69"></script>
 </body>
 </html>
