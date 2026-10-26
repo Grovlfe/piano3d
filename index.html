@@ -131,6 +131,17 @@
   body.ui-hidden #topbar, body.ui-hidden #leftbar, body.ui-hidden #transport,
   body.ui-hidden #hint, body.ui-hidden #copyright{display:none !important;}
   body.ui-hidden #settingsDrawer{transform:translateX(102%);}
+  #crosshair{position:fixed; left:50%; top:50%; width:26px; height:26px; transform:translate(-50%,-50%);
+    z-index:30; display:none; align-items:center; justify-content:center; pointer-events:none;
+    mix-blend-mode:difference;}
+  #crosshair.on{display:flex;}
+  #crosshair::before,#crosshair::after{content:''; position:absolute; background:#fff;}
+  #crosshair::before{width:2px; height:100%;}
+  #crosshair::after{width:100%; height:2px;}
+  #aimHint{position:fixed; left:50%; bottom:86px; transform:translateX(-50%); z-index:30;
+    background:rgba(10,12,15,.7); border:1px solid #2a3340; color:#9fc7ff; font-size:12px;
+    padding:6px 14px; border-radius:14px; display:none; pointer-events:none;}
+  #aimHint.on{display:block;}
   ::-webkit-scrollbar{width:12px;} ::-webkit-scrollbar-thumb{background:#3a434f; border-radius:6px;}
   .hide{display:none !important;}
 </style>
@@ -232,6 +243,7 @@
       <button class="chip" id="lp-ref" data-preset="ref">参考图·垂直光</button>
       <button class="chip" id="lp-stage" data-preset="stage">舞台聚光</button>
       <button class="chip" id="lp-cool" data-preset="cool">全局冷调</button>
+      <button class="chip" id="lp-hall" data-preset="hall">音乐厅舞台</button>
     </div>
     <div class="row"><span class="lbl">背景幕布</span><select id="backdrop" style="width:140px">
       <option value="07080b">纯黑幕布</option>
@@ -248,8 +260,9 @@
     <div class="row"><span class="lbl">水平</span><input type="range" id="camAz" min="0" max="360" value="0" style="width:150px"></div>
     <div class="row"><span class="lbl">仰角</span><input type="range" id="camEl" min="-20" max="70" value="22" style="width:150px"></div>
     <div class="row"><span class="lbl">距离</span><input type="range" id="camDist" min="120" max="600" value="260" style="width:150px"></div>
+    <div class="row"><span class="lbl">视野 FOV</span><input type="range" id="fov" min="40" max="110" value="42" style="width:150px"></div>
     <div style="font-size:11px; color:var(--dim); line-height:1.6; margin-top:6px">
-      拖动滑条从任意角度观察钢琴（含琴身内部、琴键下方），实时生效并保存，重启自动恢复；右键拖拽旋转视角时滑条自动同步。
+      坐下演奏视角由滑块控制并自动保存；按 F 站起进入漫游（WASD 移动 · 空格跳 · C 蹲 · ~ 准星）。
     </div>
   </div>
   <div class="panel sec">
@@ -318,8 +331,10 @@
   </div>
 </div>
 
-<div id="hint">鼠标/触摸：点击琴键发声，按住横向滑动 = 刮奏；滚轮缩放，右键/拖拽旋转视角</div>
+<div id="hint">点击琴键/按住滑动=刮奏；按 F 站起漫游（WASD 移动·空格跳·C 蹲·~ 准星瞄准弹奏）·F8 隐藏界面</div>
 <div id="copyright"><b>开发者：Grovlfe（现名珂眠）</b> ｜ B站：@Grovlfe ｜ 联系邮箱：3787165824@qq.com</div>
+<div id="crosshair"></div>
+<div id="aimHint">准星模式：移动鼠标转视角，左键点击准星所指琴键弹奏</div>
 <div id="toasts"></div>
 
 <div id="errScreen"><div class="box" id="errBox"></div></div>
@@ -335,6 +350,22 @@
     "three/addons/": "./js/three/addons/"
 } }
 </script>
-<script type="module" src="./js/app.js?v=67"></script>
+<script>
+  // 启动检测：直接双击 index.html 会以 file:// 打开，浏览器禁止 ES 模块加载 → 页面卡在加载。
+  // 检测到 file:// 时给出明确指引，不再无声卡住。
+  if (location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', () => {
+      const d = document.createElement('div');
+      d.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#0b0d10f2;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#d7dde4;font-family:"Segoe UI","Microsoft YaHei",sans-serif;font-size:15px;line-height:2;text-align:center;padding:24px;';
+      d.innerHTML = '<div style="font-size:22px;font-weight:700;margin-bottom:12px">3D钢琴台-Piano 3D</div>' +
+        '<div>请勿直接双击 index.html 打开（浏览器会阻止模块加载导致卡住）</div>' +
+        '<div style="color:#ffb648">正确启动方式：双击文件夹内的「启动.bat」（或运行 serve.py）</div>' +
+        '<div>启动后访问 http://127.0.0.1:8765/ 即可</div>' +
+        '<div style="margin-top:10px;color:#8b95a1">也可直接访问公网：https://grovlfe.github.io/piano3d/</div>';
+      document.body.appendChild(d);
+    });
+  }
+</script>
+<script type="module" src="./js/app.js?v=68"></script>
 </body>
 </html>
