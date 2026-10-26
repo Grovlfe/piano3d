@@ -1,11 +1,11 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
-import { PianoScene } from './scene.js?v=83';
-import { Sampler } from './audio/sampler.js?v=65';
+import { PianoScene } from './scene.js?v=84';
+import { Sampler } from './audio/sampler.js?v=66';
 import { MidiDevice } from './midi/device.js?v=57';
 import { MidiPlayer } from './midi/player.js?v=58';
 import { parseMidi } from './midi/parse.js?v=56';
-import { TransformControls } from 'three/addons/controls/TransformControls.js?v=53';
+import { TransformControls } from 'three/addons/controls/TransformControls.js?v=54';
 
 const $ = (id) => document.getElementById(id);
 
@@ -550,6 +550,13 @@ function _wireUI() {
     const v = +$('mirRotNum').value || 0;
     $('mirRotY').value = Math.max(-180, Math.min(180, v));
     applyMirrorRot();
+  });
+  // one-click reset mirror position & rotation back to factory
+  $('mirrorResetBtn').addEventListener('click', () => {
+    if (scene && scene.resetMirror()) {
+      _syncMirrorRotUI();
+      toast('镜面已复位到出厂位置与角度', 'ok');
+    } else toast('镜面不可用', 'err');
   });
   // restore mirror rotation from prefs
   try {
