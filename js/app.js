@@ -1,7 +1,7 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
-import { PianoScene } from './scene.js?v=82';
-import { Sampler } from './audio/sampler.js?v=64';
+import { PianoScene } from './scene.js?v=83';
+import { Sampler } from './audio/sampler.js?v=65';
 import { MidiDevice } from './midi/device.js?v=57';
 import { MidiPlayer } from './midi/player.js?v=58';
 import { parseMidi } from './midi/parse.js?v=56';
@@ -160,6 +160,7 @@ function _savePrefs() {
     lightPreset: state.lightPreset || '',
     backdrop: state.backdrop || '',
     fov: ($('fov') ? $('fov').value : 42),
+    viewMode: ($('viewMode') ? $('viewMode').value : 'seated'),
   };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* storage unavailable */ }
   // cloud mirror: the URL itself carries the settings — open this link on any
@@ -187,9 +188,11 @@ function _loadPrefs() {
   set('backdrop', p.backdrop);
   set('camAz', p.camAz); set('camEl', p.camEl); set('camDist', p.camDist);
   set('fov', p.fov);
+  set('viewMode', p.viewMode);
   if (scene) {
     scene.setFov(+($('fov').value || 42));
     scene.setView(+$('camAz').value, +$('camEl').value, +$('camDist').value / 100);
+    if (p.viewMode === 'fps') setTimeout(() => scene.enterFps(), 300);
   }
   set('fxContrast', p.fxContrast); set('fxBright', p.fxBright);
   set('fxSat', p.fxSat); set('fxBloom', p.fxBloom);
@@ -475,7 +478,20 @@ function _wireUI() {
   const saveMirror = () => {
     if (!scene) return;
     const off = scene.getMirrorOffset();
-    try { localStorage.setItem(MIRROR_KEY, JSON.stringify({ x: +off.x.toFixed(4), y: +off.y.toFixed(4), z: +off.z.toFixed(4) })); } catch (e) {}
+    const m = scene.getMirror();
+    const rot = m ? { x: m.rotation.x, y: m.rotation.y, z: m.rotation.z } : { x: 0, y: 0, z: 0 };
+    try { localStorage.setItem(MIRROR_KEY, JSON.stringify({ x: +off.x.toFixed(4), y: +off.y.toFixed(4), z: +off.z.toFixed(4), rx: +rot.x.toFixed(4), ry: +rot.y.toFixed(4), rz: +rot.z.toFixed(4) })); } catch (e) {}
+    _syncMirrorRotUI();
+  };
+  const _syncMirrorRotUI = () => {
+    const m = scene && scene.getMirror ? scene.getMirror() : null;
+    if (!m) return;
+    const rx = $('mirRotX'), ry = $('mirRotY'), rz = $('mirRotZ');
+    if (rx) rx.value = (m.rotation.x * 180 / Math.PI).toFixed(1);
+    if (ry) ry.value = (m.rotation.y * 180 / Math.PI).toFixed(1);
+    if (rz) rz.value = (m.rotation.z * 180 / Math.PI).toFixed(1);
+    const num = $('mirRotNum');
+    if (num) num.value = (m.rotation.y * 180 / Math.PI).toFixed(1);
   };
   const setMirrorEdit = (on) => {
     const btn = $('mirrorEditBtn');
@@ -483,8 +499,8 @@ function _wireUI() {
     if (on) {
       if (!mirrorTC) {
         mirrorTC = new TransformControls(scene.camera, scene.renderer.domElement);
-        mirrorTC.setMode('translate');
-        mirrorTC.setSpace('world');
+        mirrorTC.setMode($('mirrorModeBtn').dataset.mode || 'translate');
+        mirrorTC.setSpace('local');
         mirrorTC.setSize(1.2);
         mirrorTC.attach(scene.getMirror());
         mirrorTC.addEventListener('dragging-changed', (e) => { scene.controls.enabled = !e.value; });
@@ -503,11 +519,59 @@ function _wireUI() {
       btn.textContent = '开启编辑';
     }
   };
-  $('mirrorEditBtn').addEventListener('click', () => {
-    const on = !$('mirrorEditBtn').classList.contains('on');
-    setMirrorEdit(on);
-    if (on) toast('拖动红/绿/蓝箭头移动镜面位置，位置自动保存');
+  $('mirrorEditBtn').addEventListener('click', (e) => {
+    e.preventDefault();
+    setMirrorEdit(!$('mirrorEditBtn').classList.contains('on'));
   });
+  // translate <-> rotate arrow mode for the mirror gizmo
+  $('mirrorModeBtn').addEventListener('click', () => {
+    const btn = $('mirrorModeBtn');
+    const m = btn.dataset.mode === 'rotate' ? 'translate' : 'rotate';
+    btn.dataset.mode = m;
+    btn.textContent = m === 'rotate' ? '旋转' : '平移';
+    if (mirrorTC) mirrorTC.setMode(m);
+    toast(m === 'rotate' ? '角度环模式：拖动旋转镜面（X/Y/Z）' : '平移模式：拖动箭头移动镜面', 'ok');
+  });
+  const applyMirrorRot = () => {
+    const m = scene && scene.getMirror ? scene.getMirror() : null;
+    if (!m) return;
+    m.rotation.set(+$('mirRotX').value * Math.PI / 180, +$('mirRotY').value * Math.PI / 180, +$('mirRotZ').value * Math.PI / 180);
+    saveMirror();
+  };
+  $('mirRotX').addEventListener('input', applyMirrorRot);
+  $('mirRotY').addEventListener('input', applyMirrorRot);
+  $('mirRotZ').addEventListener('input', applyMirrorRot);
+  $('mirRotNum').addEventListener('input', () => {
+    const v = +$('mirRotNum').value || 0;
+    $('mirRotY').value = Math.max(-180, Math.min(180, v));
+    applyMirrorRot();
+  });
+  $('mirRotNum').addEventListener('change', () => {
+    const v = +$('mirRotNum').value || 0;
+    $('mirRotY').value = Math.max(-180, Math.min(180, v));
+    applyMirrorRot();
+  });
+  // restore mirror rotation from prefs
+  try {
+    const mv = JSON.parse(localStorage.getItem(MIRROR_KEY) || '{}');
+    if (mv.rx != null && scene.getMirror()) {
+      scene.getMirror().rotation.set(mv.rx, mv.ry != null ? mv.ry : 0, mv.rz != null ? mv.rz : 0);
+      _syncMirrorRotUI();
+    }
+  } catch (err) {}
+  // ---------- view mode switch (seated camera view / first-person walk) ----------
+  const setViewMode = (mode) => {
+    const fp = scene.getFpsState ? scene.getFpsState() : null;
+    if (mode === 'fps') {
+      if (fp && !fp.active) scene.enterFps();
+    } else {
+      if (fp && fp.active) scene.exitFps();
+      _setAim(false);
+    }
+    $('viewMode').value = mode;
+    _savePrefs();
+  };
+  $('viewMode').addEventListener('change', (e) => setViewMode(e.target.value));
   // restore saved mirror offset on reload (survives restarts); wait for the
   // model + mirror plane to be built first. KEY v2: the old v1 save held a
   // far-away offset that flung the mirror (and earlier, the shell itself)
@@ -677,15 +741,18 @@ function _wireUI() {
     // ---- FPS first-person: WASD / jump / crouch / sit / aim ----
     const fp = scene && scene.getFpsState ? scene.getFpsState() : null;
     if (e.key === 'f') {
-      if (fp && fp.active) { scene.exitFps(); toast('已坐下演奏（按 F 站起漫游）', 'ok'); }
-      else { scene.enterFps(); toast('漫游：WASD 移动 · 空格跳 · C 蹲 · F 坐下 · ~ 准星', 'ok'); }
+      if (fp && fp.active) {
+        const r = scene.trySit();
+        if (r === 'too_far') toast('需要靠近钢琴（琴键前方）才能坐下', 'err');
+        else toast('已坐下演奏（按 F 站起漫游）', 'ok');
+      } else { scene.enterFps(); toast('漫游：WASD 移动 · 空格跳 · C 蹲 · F 坐下 · ~ 准星', 'ok'); }
       return;
     }
     if (e.key === '`' || e.key === '~') { _toggleAim(); return; }
     if (fp && fp.active) {
       if (k === 'w' || k === 'a' || k === 's' || k === 'd') { scene.fpsKey(k, true); e.preventDefault(); return; }
       if (e.key === ' ') { scene.fpsJump(); return; }
-      if (k === 'c') { scene.fpsCrouch(true); return; }
+      if (k === 'c') { scene.fpsCrouch(); return; }   // toggle: stays crouched
     }
     let off = null;
     if (k in LOW_W) off = LOW_W[k];
@@ -706,7 +773,6 @@ function _wireUI() {
     const fp = scene && scene.getFpsState ? scene.getFpsState() : null;
     if (fp && fp.active) {
       if (k === 'w' || k === 'a' || k === 's' || k === 'd') { scene.fpsKey(k, false); return; }
-      if (k === 'c') { scene.fpsCrouch(false); return; }
     }
     let off = null;
     if (k in LOW_W) off = LOW_W[k];
@@ -723,13 +789,32 @@ function _wireUI() {
 
   // ---- aim mode (~): crosshair + pointer-lock mouse look + click-to-play ----
   let _aimActive = false, _aimNote = null;
-  const _toggleAim = () => {
-    _aimActive = scene.toggleAim();
+  const _setAim = (on) => {
+    _aimActive = on;
+    scene.toggleAimSet(on);
     const c = document.getElementById('crosshair'); if (c) c.classList.toggle('on', _aimActive);
     const h = document.getElementById('aimHint'); if (h) h.classList.toggle('on', _aimActive);
-    toast(_aimActive ? '准星模式：鼠标移动转视角，左键点击准星所指琴键弹奏' : '准星已关闭', _aimActive ? 'ok' : '');
+    if (!_aimActive && document.pointerLockElement === canvas) {
+      try { document.exitPointerLock(); } catch (err) {}
+    }
+    toast(_aimActive ? '准星模式：移动鼠标转视角，左键点击准星所指琴键/踏板' : '准星已关闭（鼠标已呼出）', _aimActive ? 'ok' : '');
+  };
+  const _toggleAim = () => {
+    const on = !_aimActive;
+    _setAim(on);
+    if (on) {
+      const fp = scene.getFpsState ? scene.getFpsState() : null;
+      if (!fp || !fp.active) scene.enterFps();   // aim works while walking
+      if (document.pointerLockElement !== canvas) {
+        try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (err) {}
+      }
+    }
   };
   const canvas = $('gl');
+  // Esc / browser releasing the lock syncs aim off (mouse usable again)
+  document.addEventListener('pointerlockchange', () => {
+    if (document.pointerLockElement !== canvas && _aimActive) _setAim(false);
+  });
   canvas.addEventListener('click', () => {
     const fp = scene && scene.getFpsState ? scene.getFpsState() : null;
     if (fp && (fp.active || fp.aim) && document.pointerLockElement !== canvas) {
@@ -747,13 +832,28 @@ function _wireUI() {
   canvas.addEventListener('mousedown', () => {
     const fp = scene && scene.getFpsState ? scene.getFpsState() : null;
     if (fp && fp.aim && document.pointerLockElement === canvas) {
-      const note = scene.aimPick();
-      if (note != null) { _aimNote = note; engine.noteOn(note, 88); scene.keyDown(note, 88); }
+      const hit = scene.aimPick();
+      if (!hit) return;
+      if (hit.type === 'pedal') { _aimPedalToggle(hit.name); }
+      else if (hit.type === 'note') { _aimNote = hit.note; engine.noteOn(hit.note, 88); scene.keyDown(hit.note, 88); }
     }
   });
   window.addEventListener('mouseup', () => {
     if (_aimNote != null) { engine.noteOff(_aimNote); scene.keyUp(_aimNote); _aimNote = null; }
   });
+  // aim-mode pedal toggling (click crosshair on a pedal)
+  const _aimPedalToggle = (name) => {
+    const ui = document.getElementById(name === 'soft' ? 'pedSoft' : name === 'sostenuto' ? 'pedSost' : 'pedSus');
+    const cur = ui ? ui.checked : false;
+    const next = !cur;
+    const v = next ? 1 : 0;
+    if (name === 'sustain') engine.setSustain(v);
+    else if (name === 'sostenuto') engine.setSostenuto(v);
+    else engine.setSoft(v);
+    scene.setPedal && scene.setPedal(name, next);
+    if (ui) ui.checked = next;
+    toast((next ? '踩下' : '松开') + ' ' + name + ' 踏板', 'ok');
+  };
 
   // self-test
   const btn = document.createElement('button');
