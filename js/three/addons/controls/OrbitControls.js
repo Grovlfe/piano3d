@@ -997,7 +997,11 @@ class OrbitControls extends EventDispatcher {
 
 			if ( pointers.length === 0 ) {
 
-				scope.domElement.setPointerCapture( event.pointerId );
+				try {
+						if ( ! scope.domElement.hasPointerCapture( event.pointerId ) ) {
+							scope.domElement.setPointerCapture( event.pointerId );
+						}
+					} catch ( err ) { /* ignore capture failures */ }
 
 				scope.domElement.addEventListener( 'pointermove', onPointerMove );
 				scope.domElement.addEventListener( 'pointerup', onPointerUp );
