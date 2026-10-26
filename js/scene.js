@@ -57,6 +57,11 @@ export class PianoScene {
     this.controls.minDistance = 0.4;
     this.controls.maxDistance = 12;
     this.controls.target.set(0, 0.1, 0);
+    // 2026-10-26: right-drag rotate & wheel zoom removed (FPS walk / sliders /
+    // native scrollbar take over). Wheel now scrolls the page UI as requested.
+    this.controls.enableRotate = false;
+    this.controls.enableZoom = false;
+    this.controls.enablePan = false;
 
     // lights
     const hemi = new THREE.HemisphereLight(0xcfd8e6, 0x1a1c20, 0.55);
@@ -630,6 +635,7 @@ export class PianoScene {
     const el = this.canvas;
     this._ptrs = new Map(); // pointerId -> current note (-1 = none)
     el.addEventListener('pointerdown', (e) => {
+      if (this._fp && this._fp.aim) return; // aim mode uses center crosshair instead
       try { el.setPointerCapture(e.pointerId); } catch (err) { /* synthetic or non-capturable pointer */ }
       this._ptrs.set(e.pointerId, -1);
       this._hit(e);
@@ -773,6 +779,121 @@ export class PianoScene {
     const el = Math.asin(Math.max(-1, Math.min(1, rel.y / Math.max(1e-6, dist)))) * 180 / Math.PI;
     return { az: Math.round(az), el: Math.round(el), dist: Math.round(dist * 100) };
   }
+  // ---------- FPS first-person walk / jump / crouch / sit / aim ----------
+  initFps() {
+    this._fp = {
+      active: false, seated: true, aim: false,
+      x: 0, z: 1.15, yaw: Math.PI, pitch: 0,
+      velY: 0, grounded: true, crouch: false,
+      eye: 1.62, bobT: 0, moving: false, fov: 42,
+      keys: { w: 0, a: 0, s: 0, d: 0 }
+    };
+    this.camera.rotation.order = 'YXZ';
+  }
+  setFov(deg) {
+    if (!this._fp) this.initFps();
+    this._fp.fov = Math.max(40, Math.min(110, deg));
+    this.camera.fov = this._fp.fov;
+    this.camera.updateProjectionMatrix();
+  }
+  getFpsState() { return this._fp; }
+  enterFps() {
+    if (!this._fp) this.initFps();
+    if (this._fp.active) return;
+    this._fp.active = true;
+    this._fp.seated = false;
+    this._fp.eye = this._fp.crouch ? 0.82 : 1.62;
+    if (this.controls) this.controls.enabled = false;
+    this._applyFpsCam();
+  }
+  exitFps() {
+    if (!this._fp) return;
+    this._fp.active = false;
+    this._fp.seated = true;
+    if (this.controls) this.controls.enabled = true;
+    // return to the seated playing view (user sliders)
+    this.setView(this._camAz, this._camEl, this._camDist);
+  }
+  fpsKey(k, down) {
+    if (!this._fp) this.initFps();
+    if (k in this._fp.keys) this._fp.keys[k] = down ? 1 : 0;
+  }
+  fpsJump() {
+    if (!this._fp || !this._fp.grounded) return;
+    this._fp.velY = 3.1; this._fp.grounded = false;
+  }
+  fpsCrouch(down) {
+    if (!this._fp) return;
+    this._fp.crouch = !!down;
+    this._fp.eye = down ? 0.82 : 1.62;
+  }
+  fpsTurn(dx, dy) {
+    if (!this._fp || !this._fp.active) return;
+    this._fp.yaw -= dx * 0.0022;
+    this._fp.pitch = Math.max(-1.35, Math.min(1.35, this._fp.pitch - dy * 0.0022));
+    this._applyFpsCam();
+  }
+  toggleAim() {
+    if (!this._fp) this.initFps();
+    this._fp.aim = !this._fp.aim;
+    return this._fp.aim;
+  }
+  _applyFpsCam() {
+    const f = this._fp;
+    this.camera.position.set(f.x, f.eye, f.z);
+    this.camera.rotation.y = f.yaw;
+    this.camera.rotation.x = f.pitch;
+  }
+  _fpsWalk(dt) {
+    const f = this._fp;
+    if (!f || !f.active) return;
+    // walking speed with a natural "step" (bob), not a gliding slide
+    const sp = (f.crouch ? 1.0 : 1.7) * dt;
+    const sy = Math.sin(f.yaw), cy = Math.cos(f.yaw);
+    let mx = 0, mz = 0;
+    if (f.keys.w) { mx += -sy; mz += -cy; }
+    if (f.keys.s) { mx += sy; mz += cy; }
+    if (f.keys.a) { mx += -cy; mz += sy; }
+    if (f.keys.d) { mx += cy; mz += -sy; }
+    const moving = mx !== 0 || mz !== 0;
+    if (moving) {
+      const inv = 1 / (Math.hypot(mx, mz) || 1);
+      f.x += mx * inv * sp;
+      f.z += mz * inv * sp;
+    }
+    // room bounds + piano body no-entry (keys side walkable)
+    const B = 5.4;
+    f.x = Math.max(-B, Math.min(B, f.x));
+    f.z = Math.max(-B, Math.min(B, f.z));
+    if (Math.abs(f.x) < 1.85 && f.z > 1.75 && f.z < 4.2) f.z = 1.75;
+    // gravity + jump
+    if (!f.grounded) {
+      f.velY -= 9.8 * dt;
+      f.eye = (f.crouch ? 0.82 : 1.62) + f.velY * dt * 1.6;
+      const baseY = f.crouch ? 0.82 : 1.62;
+      if (f.eye <= baseY) { f.eye = baseY; f.velY = 0; f.grounded = true; }
+    }
+    // walking bob: small rhythmic head motion (feet stepping), no character model
+    f.bobT += moving ? dt * (f.crouch ? 7.2 : 6.0) : 0;
+    const bob = moving ? Math.sin(f.bobT) * 0.032 : 0;
+    if (f.grounded) f.eye = (f.crouch ? 0.82 : 1.62) + bob;
+    this._applyFpsCam();
+    // crosshair note under center (aim mode)
+    if (f.aim) {
+      const note = this.aimPick();
+      document.body.setAttribute('data-aimnote', note == null ? '-1' : String(note));
+    }
+  }
+  aimPick() {
+    const origin = this.camera.position.clone();
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    const ray = new THREE.Raycaster(origin, dir, 0.01, 5);
+    const meshes = [];
+    for (const n in this.keys) if (this.keys[n]) meshes.push(this.keys[n].mesh);
+    const hits = ray.intersectObjects(meshes, false);
+    return hits.length ? hits[0].object.userData.note : null;
+  }
   getMirrorOffset() {
     const m = this.getMirror();
     if (!m || !this._mirrorDefault) return { x: 0, y: 0, z: 0 };
@@ -809,12 +930,16 @@ export class PianoScene {
   applyLightPreset(name) {
     if (!this.keyLight) return;
     const P = {
-      default: { hemi:0.55, hemiSky:0xcfd8e6, hemiGround:0x1a1c20, key:1.5, keyCol:0xfff2df, fill:0.35, spot:0.6, az:-0.65, el:0.9, bg:0x232e40, env:1.0, expos:1.05 },
-      ref:     { hemi:0.78, hemiSky:0xe6ecf6, hemiGround:0x0d0f13, key:2.0, keyCol:0xfff6e8, fill:0.10, spot:0.85, az:0.12, el:1.45, bg:0x07080b, env:1.35, expos:1.0 },
-      stage:   { hemi:0.30, hemiSky:0xc9d2e4, hemiGround:0x05060a, key:1.9, keyCol:0xffeed9, fill:0.10, spot:1.5, az:-0.8, el:1.25, bg:0x040507, env:0.9, expos:0.95 },
-      cool:    { hemi:0.85, hemiSky:0xbcd0ef, hemiGround:0x14161c, key:0.95, keyCol:0xdfe9ff, fill:0.5, spot:0.5, az:0.6, el:0.75, bg:0x14171c, env:0.85, expos:1.0 }
+      default: { hemi:0.55, hemiSky:0xcfd8e6, hemiGround:0x1a1c20, key:1.5, keyCol:0xfff2df, fill:0.35, spot:0.6, az:-0.65, el:0.9, bg:0x232e40, env:1.0, expos:1.05, fog:null },
+      ref:     { hemi:0.78, hemiSky:0xe6ecf6, hemiGround:0x0d0f13, key:2.0, keyCol:0xfff6e8, fill:0.10, spot:0.85, az:0.12, el:1.45, bg:0x07080b, env:1.35, expos:1.0, fog:null },
+      stage:   { hemi:0.30, hemiSky:0xc9d2e4, hemiGround:0x05060a, key:1.9, keyCol:0xffeed9, fill:0.10, spot:1.5, az:-0.8, el:1.25, bg:0x040507, env:0.9, expos:0.95, fog:null },
+      cool:    { hemi:0.85, hemiSky:0xbcd0ef, hemiGround:0x14161c, key:0.95, keyCol:0xdfe9ff, fill:0.5, spot:0.5, az:0.6, el:0.75, bg:0x14171c, env:0.85, expos:1.0, fog:null },
+      hall:    { hemi:0.5,  hemiSky:0xf2e6d0, hemiGround:0x0a0906, key:2.2, keyCol:0xffe9c4, fill:0.08, spot:1.6, az:0.2, el:1.35, bg:0x0b0c10, env:1.6, expos:1.05, fog:[0x0b0c10, 5.5, 26] }
     };
     const p = P[name] || P.default;
+    // music-hall depth fog (space feel); cleared for studio presets
+    if (p.fog) this.scene.fog = new THREE.Fog(p.fog[0], p.fog[1], p.fog[2]);
+    else this.scene.fog = null;
     this.hemiLight.intensity = p.hemi;
     this.hemiLight.color.set(p.hemiSky);
     this.hemiLight.groundColor.set(p.hemiGround);
@@ -1013,6 +1138,7 @@ export class PianoScene {
       const dt = Math.min(0.05, this.clock.getDelta());
       this._animateKeys(dt);
       this.controls.update();
+      this._fpsWalk(dt);
       this._updateFps();
       if (this._useComposer && this.composer) this.composer.render();
       else if (this.renderer) this.renderer.render(this.scene, this.camera);
