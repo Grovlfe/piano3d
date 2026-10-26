@@ -806,6 +806,22 @@ export class PianoScene {
     if (this.controls) this.controls.enabled = false;
     this._applyFpsCam();
   }
+  // Sit down on the bench: allowed only when close to the piano (in front, beside keys).
+  // Standing away -> refuses and hints to walk closer (no more "sitting behind the piano").
+  trySit() {
+    if (!this._fp) this.initFps();
+    if (!this._fp.active) return 'not_fps';
+    const f = this._fp;
+    const near = Math.abs(f.x) < 1.6 && f.z > 0.4 && f.z < 2.1;
+    if (!near) return 'too_far';
+    // snap onto the bench (centered, bench distance), then return to the seated playing view
+    f.x = 0; f.z = 1.25;
+    this._fp.active = false;
+    this._fp.seated = true;
+    if (this.controls) this.controls.enabled = true;
+    this.setView(this._camAz, this._camEl, this._camDist);
+    return 'ok';
+  }
   exitFps() {
     if (!this._fp) return;
     this._fp.active = false;
@@ -820,12 +836,13 @@ export class PianoScene {
   }
   fpsJump() {
     if (!this._fp || !this._fp.grounded) return;
-    this._fp.velY = 3.1; this._fp.grounded = false;
+    this._fp.velY = 4.6; this._fp.grounded = false;   // taller jump (human leap)
   }
   fpsCrouch(down) {
     if (!this._fp) return;
-    this._fp.crouch = !!down;
-    this._fp.eye = down ? 0.82 : 1.62;
+    if (down === undefined) { this._fp.crouch = !this._fp.crouch; }   // toggle: C stays crouched
+    else this._fp.crouch = !!down;
+    this._fp.eye = this._fp.crouch ? 0.82 : 1.62;
   }
   fpsTurn(dx, dy) {
     if (!this._fp || !this._fp.active) return;
@@ -836,6 +853,11 @@ export class PianoScene {
   toggleAim() {
     if (!this._fp) this.initFps();
     this._fp.aim = !this._fp.aim;
+    return this._fp.aim;
+  }
+  toggleAimSet(on) {
+    if (!this._fp) this.initFps();
+    this._fp.aim = !!on;
     return this._fp.aim;
   }
   _applyFpsCam() {
@@ -880,8 +902,10 @@ export class PianoScene {
     this._applyFpsCam();
     // crosshair note under center (aim mode)
     if (f.aim) {
-      const note = this.aimPick();
-      document.body.setAttribute('data-aimnote', note == null ? '-1' : String(note));
+      const hit = this.aimPick();
+      if (hit && hit.type === 'note') document.body.setAttribute('data-aimnote', String(hit.note));
+      else if (hit && hit.type === 'pedal') document.body.setAttribute('data-aimpedal', hit.name);
+      else { document.body.setAttribute('data-aimnote', '-1'); document.body.removeAttribute('data-aimpedal'); }
     }
   }
   aimPick() {
@@ -889,10 +913,18 @@ export class PianoScene {
     const dir = new THREE.Vector3();
     this.camera.getWorldDirection(dir);
     const ray = new THREE.Raycaster(origin, dir, 0.01, 5);
+    // pedals first (closer to the player at the bench)
+    for (const name in this.pedals) {
+      const p = this.pedals[name];
+      if (p && p.mesh) {
+        const hits = ray.intersectObject(p.mesh, false);
+        if (hits.length) return { type: 'pedal', name };
+      }
+    }
     const meshes = [];
     for (const n in this.keys) if (this.keys[n]) meshes.push(this.keys[n].mesh);
     const hits = ray.intersectObjects(meshes, false);
-    return hits.length ? hits[0].object.userData.note : null;
+    return hits.length ? { type: 'note', note: hits[0].object.userData.note } : null;
   }
   getMirrorOffset() {
     const m = this.getMirror();
