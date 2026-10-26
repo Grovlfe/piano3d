@@ -194,10 +194,13 @@ export class Sampler {
     const n = this._trans(note);
     if (n < NOTE0 || n > NOTE1) return;
     vel = Math.max(1, Math.min(127, Math.round(vel)));
-    // velocity curve
+    // velocity curve (concert-grand feel: soft is feather-light, forte has punch)
     let g = vel / 127;
-    if (this.velCurve === 1) g = Math.pow(g, 1.5);
+    if (this.velCurve === 1) g = Math.pow(g, 1.65);
     else if (this.velCurve === 2) g = Math.pow(g, 0.75);
+    // D-274 character: low keys need more arm, high keys are naturally louder
+    const nf = Math.min(1, Math.max(0, (n - NOTE0) / (NOTE1 - NOTE0)));
+    g *= 0.72 + 0.5 * nf;
 
     if (this.recordSink) this.recordSink(n, vel, true);
 
@@ -590,7 +593,9 @@ export class Sampler {
       for (const set of this.voices.values()) {
         for (const v of [...set]) {
           if (v.sustained && !this.sostenutoNotes.has(v.note)) {
-            this._releaseVoice(v, now, 0.16); // crisp pedal lift — no lingering echo
+            // pedal lift: dampers fall together but each string decays at its
+            // own rate (bass longer, treble quick) — smooth, never instant.
+            this._releaseVoice(v, now, Math.max(0.22, this._damperTime(v.note, v.vel) * 1.15));
           }
         }
       }
@@ -612,7 +617,7 @@ export class Sampler {
       for (const n of this.sostenutoNotes) {
         const set = this.voices.get(n);
         if (set) for (const v of [...set]) {
-          if (v.sustained && !this.sustain) this._releaseVoice(v, now, 0.16);
+          if (v.sustained && !this.sustain) this._releaseVoice(v, now, Math.max(0.22, this._damperTime(v.note, v.vel) * 1.15));
         }
       }
       this.sostenutoNotes.clear();
