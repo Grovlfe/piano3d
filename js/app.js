@@ -1,7 +1,7 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
-import { PianoScene } from './scene.js?v=84';
-import { Sampler } from './audio/sampler.js?v=66';
+import { PianoScene } from './scene.js?v=85';
+import { Sampler } from './audio/sampler.js?v=67';
 import { MidiDevice } from './midi/device.js?v=57';
 import { MidiPlayer } from './midi/player.js?v=58';
 import { parseMidi } from './midi/parse.js?v=56';
@@ -435,6 +435,33 @@ function _wireUI() {
     setTimeout(() => URL.revokeObjectURL(a.href), 3000);
     toast('设置已导出（可保存到云盘/邮箱，跨设备导入恢复）', 'ok');
   });
+  // 云保存: pack ALL settings into a shareable URL (works across devices/browsers)
+  $('btnCloud').addEventListener('click', () => {
+    _savePrefs();
+    const out = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('piano3d_') === 0) {
+        try { out[k] = JSON.parse(localStorage.getItem(k)); } catch (e) { out[k] = localStorage.getItem(k); }
+      }
+    }
+    const link = location.origin + location.pathname + '#p=' + btoa(unescape(encodeURIComponent(JSON.stringify(out))));
+    try {
+      const done = () => toast('云备份链接已复制，打开该链接即可恢复全部设置', 'ok');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(done, () => { _fallbackCopy(link); done(); });
+      } else { _fallbackCopy(link); done(); }
+      console.log('CLOUD_BACKUP_URL=' + link);
+    } catch (err) { toast('复制失败，链接见控制台（CLOUD_BACKUP_URL）', 'err'); }
+  });
+  const _fallbackCopy = (txt) => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = txt; ta.style.cssText = 'position:fixed;left:-9999px';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+    } catch (e) {}
+  };
   // import settings JSON -> restore everything, then reload
   $('btnImport').addEventListener('click', () => $('prefsImport').click());
   $('prefsImport').addEventListener('change', (e) => {
@@ -487,11 +514,15 @@ function _wireUI() {
     const m = scene && scene.getMirror ? scene.getMirror() : null;
     if (!m) return;
     const rx = $('mirRotX'), ry = $('mirRotY'), rz = $('mirRotZ');
-    if (rx) rx.value = (m.rotation.x * 180 / Math.PI).toFixed(1);
-    if (ry) ry.value = (m.rotation.y * 180 / Math.PI).toFixed(1);
-    if (rz) rz.value = (m.rotation.z * 180 / Math.PI).toFixed(1);
+    if (rx) rx.value = (m.rotation.x * 180 / Math.PI).toFixed(3);
+    if (ry) ry.value = (m.rotation.y * 180 / Math.PI).toFixed(3);
+    if (rz) rz.value = (m.rotation.z * 180 / Math.PI).toFixed(3);
     const num = $('mirRotNum');
-    if (num) num.value = (m.rotation.y * 180 / Math.PI).toFixed(1);
+    if (num) num.value = (m.rotation.y * 180 / Math.PI).toFixed(3);
+    const px = $('mirPosX'), py = $('mirPosY'), pz = $('mirPosZ');
+    if (px) px.value = m.position.x.toFixed(3);
+    if (py) py.value = m.position.y.toFixed(3);
+    if (pz) pz.value = m.position.z.toFixed(3);
   };
   const setMirrorEdit = (on) => {
     const btn = $('mirrorEditBtn');
@@ -551,6 +582,19 @@ function _wireUI() {
     $('mirRotY').value = Math.max(-180, Math.min(180, v));
     applyMirrorRot();
   });
+  // fine position input (0.001 precision) — absolute world coords
+  const applyMirrorPos = () => {
+    const m = scene && scene.getMirror ? scene.getMirror() : null;
+    if (!m) return;
+    m.position.set(
+      +($('mirPosX').value || 0), +($('mirPosY').value || 0), +($('mirPosZ').value || 0)
+    );
+    m.updateMatrixWorld(true);
+    saveMirror();
+  };
+  $('mirPosX').addEventListener('input', applyMirrorPos);
+  $('mirPosY').addEventListener('input', applyMirrorPos);
+  $('mirPosZ').addEventListener('input', applyMirrorPos);
   // one-click reset mirror position & rotation back to factory
   $('mirrorResetBtn').addEventListener('click', () => {
     if (scene && scene.resetMirror()) {
@@ -558,11 +602,14 @@ function _wireUI() {
       toast('镜面已复位到出厂位置与角度', 'ok');
     } else toast('镜面不可用', 'err');
   });
-  // restore mirror rotation from prefs
+  // restore mirror rotation + position from prefs (0.001 precision kept)
   try {
     const mv = JSON.parse(localStorage.getItem(MIRROR_KEY) || '{}');
-    if (mv.rx != null && scene.getMirror()) {
-      scene.getMirror().rotation.set(mv.rx, mv.ry != null ? mv.ry : 0, mv.rz != null ? mv.rz : 0);
+    const m = scene.getMirror();
+    if (m) {
+      if (mv.rx != null) m.rotation.set(mv.rx, mv.ry != null ? mv.ry : 0, mv.rz != null ? mv.rz : 0);
+      if (mv.x != null) m.position.set(mv.x, mv.y != null ? mv.y : m.position.y, mv.z != null ? mv.z : m.position.z);
+      m.updateMatrixWorld(true);
       _syncMirrorRotUI();
     }
   } catch (err) {}
