@@ -307,6 +307,9 @@ export class Sampler {
     const source = ctx.createBufferSource();
     source.buffer = buf;
     source.playbackRate.value = pb;
+    // a real D-274 is never perfectly in tune: +/-1.5 cents per note gives
+    // the chorus/space of a concert grand without sounding out of tune
+    source.detune.value = (Math.random() * 3 - 1.5) * (0.6 + 0.4 * (vel / 127));
 
     // NO source.loop: looping a sampled sustain can make short repeating
     // artifacts (短促重复) when the loop region re-enters too early. A piano
