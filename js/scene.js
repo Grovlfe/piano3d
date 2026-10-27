@@ -759,17 +759,14 @@ export class PianoScene {
     this.scene.add(fbRef);
     this.fbReflector = fbRef;
     this._mirrorDefault = fbRef.position.clone();
-    // the mirror plane must lie PERFECTLY parallel to the fall-board surface:
-    // inherit the board's world orientation instead of assuming (0,0,0)
-    try {
-      const q = new THREE.Quaternion();
-      fb.getWorldQuaternion(q);
-      fbRef.quaternion.copy(q);
-      fbRef.updateMatrixWorld(true);
-      this._mirrorDefaultRot = fbRef.rotation.clone();
-    } catch (err) {
-      this._mirrorDefaultRot = new THREE.Euler(0, 0, 0);
-    }
+    // Mirror plane stays VERTICAL (default orientation (0,0,0), normal +z
+    // toward the player). It is placed flush with the board FRONT surface so
+    // it reads parallel to the fall-board visually. Inheriting the board's
+    // world quaternion flipped the plane (the board has its own rotation)
+    // and made the mirror invisible — rejected. Tiny angle adjustments are
+    // done by the user via 细准环/细准值 and persisted.
+    this._mirrorDefaultRot = new THREE.Euler(0, 0, 0);
+    fbRef.rotation.set(0, 0, 0);
     this._fbRefInfo = { frontZ: fbb.max.z, keyTop: keyTop };
   }
   // ---- mirror position editor (user-adjustable, persisted) ----
