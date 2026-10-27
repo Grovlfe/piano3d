@@ -602,13 +602,16 @@ function _wireUI() {
       toast('镜面已复位到出厂位置与角度', 'ok');
     } else toast('镜面不可用', 'err');
   });
-  // restore mirror rotation + position from prefs (0.001 precision kept)
+  // restore mirror rotation + position from prefs (stored as OFFSET vs default)
   try {
     const mv = JSON.parse(localStorage.getItem(MIRROR_KEY) || '{}');
     const m = scene.getMirror();
     if (m) {
       if (mv.rx != null) m.rotation.set(mv.rx, mv.ry != null ? mv.ry : 0, mv.rz != null ? mv.rz : 0);
-      if (mv.x != null) m.position.set(mv.x, mv.y != null ? mv.y : m.position.y, mv.z != null ? mv.z : m.position.z);
+      if (mv.x != null && scene._mirrorDefault) {
+        const d = scene._mirrorDefault;
+        m.position.set(d.x + mv.x, d.y + (mv.y != null ? mv.y : 0), d.z + (mv.z != null ? mv.z : 0));
+      }
       m.updateMatrixWorld(true);
       _syncMirrorRotUI();
     }
