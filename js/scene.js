@@ -612,7 +612,9 @@ export class PianoScene {
   keyDown(note, vel) {
     const k = this.keys[note];
     if (!k) return;
-    const depth = (this.keyH || 0.026) * (0.08 + 0.26 * (vel / 127));
+    // real grand stroke: pp ~3mm, ff ~11mm (Steinway action travel). A touch
+    // deeper than before for natural feel — never beyond the real key dip.
+    const depth = (this.keyH || 0.026) * (0.12 + 0.30 * (vel / 127));
     k.target = depth;
     k.dir = 1;   // explicit direction intent (press): spring uses press params
     // IMPORTANT: k.vel is the SPRING velocity in m/s. Never assign the MIDI
@@ -757,6 +759,17 @@ export class PianoScene {
     this.scene.add(fbRef);
     this.fbReflector = fbRef;
     this._mirrorDefault = fbRef.position.clone();
+    // the mirror plane must lie PERFECTLY parallel to the fall-board surface:
+    // inherit the board's world orientation instead of assuming (0,0,0)
+    try {
+      const q = new THREE.Quaternion();
+      fbs[0].getWorldQuaternion(q);
+      fbRef.quaternion.copy(q);
+      fbRef.updateMatrixWorld(true);
+      this._mirrorDefaultRot = fbRef.rotation.clone();
+    } catch (err) {
+      this._mirrorDefaultRot = new THREE.Euler(0, 0, 0);
+    }
     this._fbRefInfo = { frontZ: fbb.max.z, keyTop: keyTop };
   }
   // ---- mirror position editor (user-adjustable, persisted) ----
@@ -805,9 +818,9 @@ export class PianoScene {
     const m = this.getMirror();
     if (!m) return false;
     if (this._mirrorDefault) m.position.copy(this._mirrorDefault);
-    m.rotation.set(0, 0, 0);
+    m.rotation.copy(this._mirrorDefaultRot || new THREE.Euler(0, 0, 0));
+    m.updateMatrixWorld(true);
     try { localStorage.removeItem('piano3d_mirror_v2'); } catch (e) {}
-    if (this._fp && this._fp.active) { /* keep fps state */ }
     return true;
   }
   getFpsState() { return this._fp; }
@@ -1102,8 +1115,11 @@ export class PianoScene {
       r.setPixelRatio(pr);
       // setPixelRatio alone does NOT resize the drawing buffer — call
       // setSize so the quality switch visibly changes resolution (fixes
-      // "切换画质没反应").
+      // "切换画质没反应"). Sync the composer target too, otherwise the
+      // post-process chain keeps rendering at the OLD low resolution and
+      // ULTRA looks blurry.
       r.setSize(window.innerWidth, window.innerHeight, false);
+      if (this.composer) this.composer.setSize(window.innerWidth, window.innerHeight);
     }
     const sizes = { 4: 1024, 3: 768, 2: 640, 1: 512, 0: 384 };
     const msz = sizes[q.level] || sizes[0];
