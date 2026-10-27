@@ -763,7 +763,7 @@ export class PianoScene {
     // inherit the board's world orientation instead of assuming (0,0,0)
     try {
       const q = new THREE.Quaternion();
-      fbs[0].getWorldQuaternion(q);
+      fb.getWorldQuaternion(q);
       fbRef.quaternion.copy(q);
       fbRef.updateMatrixWorld(true);
       this._mirrorDefaultRot = fbRef.rotation.clone();
