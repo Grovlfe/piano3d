@@ -340,7 +340,7 @@ export class Sampler {
       // attack preserved — audible in super-fast trills. When the pedal is down
       // the tap continues into the normal sustained voice below (real grand:
       // the damper is already lifted, the string rings on).
-      const tapSec = Math.max(0.09, Math.min(0.3, this._damperTime(note, vel) * 0.7));
+      const tapSec = Math.max(0.03, Math.min(0.3, this._damperTime(note, vel) * 0.7));
       g.gain.linearRampToValueAtTime(0.0001, now + tapSec);
       source.start(now);
       source.stop(now + tapSec + 0.05);
@@ -423,7 +423,7 @@ export class Sampler {
       // Released while the sample was loading, no pedal: play a short damped
       // tap with a NATURAL damper tail (not a hard cut) so fast legato keeps
       // flowing — the damper falls but the string decays, it never snaps.
-      const tapSec = Math.max(0.09, Math.min(0.3, this._damperTime(note, vel) * 0.7));
+      const tapSec = Math.max(0.03, Math.min(0.3, this._damperTime(note, vel) * 0.7));
       g.gain.cancelScheduledValues(now);
       g.gain.setValueAtTime(Math.max(0.0001, peak * 0.9), now);
       g.gain.linearRampToValueAtTime(0.0001, now + tapSec);
@@ -508,10 +508,12 @@ export class Sampler {
   // instantly — a Steinway D-274 damper kills the string FAST (50–320 ms).
   _damperTime(note, vel) {
     const freq = 27.5 * Math.pow(2, (note - NOTE0) / 12);
-    let t = 0.055 + 16 / freq;   // C2 ~0.30s, C4 ~0.12s, C6 ~0.07s
-    t = Math.max(0.045, Math.min(0.32, t));
+    // A0 ~0.26s · C2 ~0.23s · C4 ~0.09s · C6 ~0.056s · C8 ~0.048s —
+    // the full 88-key damper travel of a real grand, treble virtually instant.
+    let t = 0.045 + 12 / freq;
+    t = Math.max(0.045, Math.min(0.26, t));
     const vn = Math.max(0, Math.min(1, (vel - 1) / 126));
-    return t * (0.78 + 0.22 * vn);
+    return t * (0.85 + 0.15 * vn);
   }
 
   _killVoice(v, now) {
@@ -534,11 +536,18 @@ export class Sampler {
       v.g.gain.cancelScheduledValues(now);
       const cur = Math.max(0.0001, v.g.gain.value);
       v.g.gain.setValueAtTime(cur, now);
-      // exponential damping — acoustic dampers decay, they don't linearly cut.
-      // tau = sec/5.5 reaches -60dB near the stop time while the audible front
-      // (the damper contact) falls off fast, matching a real grand's damper.
-      v.g.gain.setTargetAtTime(0.0001, now, Math.max(0.012, sec / 4.2));
-      v.source.stop(now + sec + 0.12);
+      // REAL D-274 damping: treble stops with a clean near-instant mute
+      // (linear ramp, no residual flutter — the audible "fake" treble tail
+      // is gone); bass/mid decays exponentially like long strings.
+      const freq = 27.5 * Math.pow(2, (v.note - NOTE0) / 12);
+      if (freq >= 1100) {
+        const t2 = Math.max(0.010, Math.min(0.028, sec * 0.5));
+        v.g.gain.linearRampToValueAtTime(0.0001, now + t2);
+        v.source.stop(now + t2 + 0.03);
+      } else {
+        v.g.gain.setTargetAtTime(0.0001, now, Math.max(0.012, sec / 4.2));
+        v.source.stop(now + sec + 0.10);
+      }
     } catch (e) {}
     v.releaseT = now + sec;
     // Safety: if the AudioContext stalls (auto-play policy before any user
