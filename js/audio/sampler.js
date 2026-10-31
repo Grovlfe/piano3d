@@ -96,7 +96,7 @@ export class Sampler {
   setImported(notes) { this.imported = notes; }
 
   // ---------- soundfont pack loading (default VSL OGG pack) ----------
-  async loadDefaultPack(manifestUrl, onProgress) {
+  async loadDefaultPack(manifestUrl, onProgress, packFile) {
     try {
       // Remote (GitHub Pages) serves the whole sample set as ONE piano.pack
       // through the jsDelivr CDN (CORS-friendly, fast) so startup downloads a
@@ -106,9 +106,11 @@ export class Sampler {
       const base = onGitHubPages
         ? 'https://cdn.jsdelivr.net/gh/Grovlfe/piano3d@main/soundfont/default/'
         : 'soundfont/default/';
+      // full pack exists only in the local/install distribution (GitHub hard cap)
+      const pf = (packFile || 'piano.pack');
       let packOk = false;
       try {
-        const pr = await fetch(base + 'piano.pack');
+        const pr = await fetch(base + pf);
         if (pr.ok) {
           const ab = await pr.arrayBuffer();
           const dv = new DataView(ab);
