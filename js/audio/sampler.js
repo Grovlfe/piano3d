@@ -194,13 +194,14 @@ export class Sampler {
     const n = this._trans(note);
     if (n < NOTE0 || n > NOTE1) return;
     vel = Math.max(1, Math.min(127, Math.round(vel)));
-    // velocity curve — STANDARD response by default (soft is audible, forte is
-    // strong but never clipped): near-linear with a gentle floor lift. Curves 2/3
-    // are alternative expressive profiles selectable in settings.
+    // velocity curve — STANDARD response by default: the multi-layer samples
+    // already carry each strike's natural loudness, so digital scaling stays
+    // in the 0.55–1.0 band — pp stays soft but never vanishes, ff stays
+    // strong but never clips. Curves 2/3 are alternative expressive profiles.
     let g = vel / 127;
-    if (this.velCurve === 1) g = 0.18 + 0.82 * g;
-    else if (this.velCurve === 2) g = Math.pow(g, 0.9);
-    else if (this.velCurve === 3) g = Math.pow(g, 1.65);
+    if (this.velCurve === 1) g = 0.55 + 0.45 * g;
+    else if (this.velCurve === 2) g = 0.50 + 0.50 * Math.pow(g, 0.9);
+    else if (this.velCurve === 3) g = 0.50 + 0.50 * Math.pow(g, 1.65);
     // D-274 character: low keys fuller (never weak), high keys naturally
     // present but not piercing
     const nf = Math.min(1, Math.max(0, (n - NOTE0) / (NOTE1 - NOTE0)));
@@ -252,6 +253,31 @@ export class Sampler {
     }
   }
 
+  // pick velocity layers with SMOOTH crossfade: a velocity inside a bucket
+  // plays that layer alone; a velocity in the gap between two buckets blends
+  // the two neighbours proportionally so dynamics never 'jump' at a boundary
+  // (this was audible as an uneven, gated response on the 8-layer full pack).
+  _pickLayers(layers, vel) {
+    const arr = [...layers].sort((a, b) => a.velLo - b.velLo);
+    for (const l of arr) {
+      if (vel >= l.velLo && vel <= l.velHi) return [{ l, w: 1 }];
+    }
+    let below = null, above = null;
+    for (const l of arr) {
+      if (l.velHi < vel) below = l;
+      else { above = l; break; }
+    }
+    if (below && above) {
+      const span = Math.max(1, above.velLo - below.velHi);
+      const pos = (vel - below.velHi) / span;
+      const w1 = Math.cos((pos * Math.PI) / 2);        // equal-power fade
+      const w2 = Math.sin((pos * Math.PI) / 2);
+      return [{ l: below, w: w1 }, { l: above, w: w2 }];
+    }
+    const b = below || above || arr[0];
+    return [{ l: b, w: 1 }];
+  }
+
   async _playSample(note, vel, gVel, layers, opts) {
     const now = this.ctx.currentTime;
     const myBorn = now;
@@ -263,20 +289,9 @@ export class Sampler {
     if (oldSet) {
       for (const v of [...oldSet]) this._killVoice(v, now);
     }
-    // pick layers: find layers covering vel, blend nearest two
-    let use = [];
-    for (const l of layers) {
-      if (vel >= l.velLo && vel <= l.velHi) use.push(l);
-    }
-    if (!use.length) {
-      let best = null, bestD = 1e9;
-      for (const l of layers) {
-        const d = vel < l.velLo ? l.velLo - vel : (vel > l.velHi ? vel - l.velHi : 0);
-        if (d < bestD) { bestD = d; best = l; }
-      }
-      if (best) use = [best];
-    }
-    if (use.length > 2) use = [use[0], use[use.length - 1]];
+    // pick layers with smooth crossfade (buckets + gap blending)
+    const picks = this._pickLayers(layers, vel);
+    const use = picks.map(p => p.l);
 
     // wide, natural stereo field: low keys left, high keys right (player view),
     // plus a tiny per-note randomization so chords bloom instead of pin-pointing
@@ -299,7 +314,7 @@ export class Sampler {
       // NOTE: do NOT skip quick+pedal notes — a real grand strikes the string
       // even on a short tap, and the pedal then sustains it. Skipping here
       // caused "instant gaps" in legato lines with the sustain pedal down.
-      this._spawnVoice(note, buf, use[i], vel, gVel, pan, { ...opts, quick }, now);
+      this._spawnVoice(note, buf, use[i], vel, gVel, pan, { ...opts, quick, w: picks[i].w }, now);
     }
   }
 
@@ -324,12 +339,14 @@ export class Sampler {
 
     const g = ctx.createGain();
     let peak = gVel;
+    if (opts.w) peak *= Math.sqrt(opts.w);   // equal-power crossfade weight
     if (l.atten) peak *= Math.pow(10, -(l.atten) / 200);
     if (this.soft) peak *= 0.48;
-    // Steinway D-274 dynamics: soft touches are rounder and quieter, heavy
-    // strikes gain body — a wider dynamic range than a plain linear map.
+    // Steinway D-274 dynamics: the sample layers already carry the natural
+    // loudness of each strike, so the extra digital scaling stays GENTLE —
+    // soft notes stay round and quiet, forte gains body without clipping.
     const vn = Math.max(0, Math.min(1, (vel - 1) / 126));
-    peak *= 0.80 + 0.55 * Math.pow(vn, 1.5);
+    peak *= 0.88 + 0.35 * Math.pow(vn, 1.2);
     // attack follows touch: ff ~2 ms, pp ~11 ms (like a real action)
     const atk = 0.002 + (1 - vn) * 0.009;
     g.gain.setValueAtTime(0, now);
@@ -536,17 +553,20 @@ export class Sampler {
       v.g.gain.cancelScheduledValues(now);
       const cur = Math.max(0.0001, v.g.gain.value);
       v.g.gain.setValueAtTime(cur, now);
-      // REAL D-274 damping: treble stops with a clean near-instant mute
-      // (linear ramp, no residual flutter — the audible "fake" treble tail
-      // is gone); bass/mid decays exponentially like long strings.
       const freq = 27.5 * Math.pow(2, (v.note - NOTE0) / 12);
+      // REAL D-274 damping: the damper falls onto the string and the string
+      // reacts with a short NATURAL exponential fade at every register.
+      // Treble rounds off quickly (no hard 10ms cut, no 'click'), bass/mid
+      // ring a little longer like long strings. setTargetAtTime is an
+      // exponential approach — the audible tail is ~4x the time constant.
       if (freq >= 1100) {
-        const t2 = Math.max(0.010, Math.min(0.028, sec * 0.5));
-        v.g.gain.linearRampToValueAtTime(0.0001, now + t2);
-        v.source.stop(now + t2 + 0.03);
+        const tc = Math.max(0.020, Math.min(0.050, 0.02 + sec * 0.5));
+        v.g.gain.setTargetAtTime(0.0001, now, tc);
+        v.source.stop(now + Math.max(0.10, tc * 6) + 0.05);
       } else {
-        v.g.gain.setTargetAtTime(0.0001, now, Math.max(0.012, sec / 4.2));
-        v.source.stop(now + sec + 0.10);
+        const tc = Math.max(0.022, Math.min(0.12, sec / 2.8));
+        v.g.gain.setTargetAtTime(0.0001, now, tc);
+        v.source.stop(now + Math.max(0.16, tc * 6) + 0.05);
       }
     } catch (e) {}
     v.releaseT = now + sec;
