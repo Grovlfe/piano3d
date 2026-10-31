@@ -409,7 +409,7 @@ export class Sampler {
 
     const voice = {
       note, source, g, vel, l, now, sustained: false, releaseT: 0,
-      loopOk: hasLoop, buf,
+      loopOk: hasLoop, buf, pressed: true,   // held down by the finger
     };
     if (!this.voices.has(note)) this.voices.set(note, new Set());
     this.voices.get(note).add(voice);
@@ -508,14 +508,16 @@ export class Sampler {
     const now = this.ctx.currentTime;
     const hold = this.sustain || (this.sostenuto && this.sostenutoNotes.has(n));
     for (const v of [...set]) {
-      if (v.sustained) continue;
+      v.pressed = false;              // finger lifted: the damper rules apply again
       if (hold) {
+        // sustain pedal (or sostenuto capture) is down AT THE MOMENT OF RELEASE:
+        // the lifted key keeps ringing — exactly a real grand, where the pedal
+        // lifts the dampers only when the finger lets go.
         v.sustained = true;
         continue;
       }
-      // Real Steinway D-274 damper: bass damps slowly, treble fast; forte
-      // presses damper a little slower (longer natural tail). Exponential
-      // decay, never an instant cut — this removes the "stiff damper" feel.
+      // No pedal at release -> damp immediately with a natural physical
+      // transition (exponential decay, never a hard cut).
       this._releaseVoice(v, now, this._damperTime(n, v.vel));
     }
   }
@@ -631,7 +633,11 @@ export class Sampler {
       const now = this.ctx.currentTime;
       for (const set of this.voices.values()) {
         for (const v of [...set]) {
-          if (v.sustained && !this.sostenutoNotes.has(v.note)) {
+          // Damper sovereignty rule: a key that is STILL HELD DOWN by the
+          // finger is never damped by the pedal — no matter how many times
+          // the pedal is pressed/released while the key stays down. The
+          // damper only acts on keys whose finger has lifted.
+          if (v.sustained && !v.pressed && !this.sostenutoNotes.has(v.note)) {
             // pedal lift: dampers fall together but each string decays at its
             // own rate (bass a touch longer, treble quick) — FAST release,
             // like a real grand's pedal-up (never a hard click).
@@ -657,7 +663,7 @@ export class Sampler {
       for (const n of this.sostenutoNotes) {
         const set = this.voices.get(n);
         if (set) for (const v of [...set]) {
-          if (v.sustained && !this.sustain) this._releaseVoice(v, now, Math.max(0.22, this._damperTime(v.note, v.vel) * 1.15));
+          if (v.sustained && !v.pressed && !this.sustain) this._releaseVoice(v, now, Math.max(0.22, this._damperTime(v.note, v.vel) * 1.15));
         }
       }
       this.sostenutoNotes.clear();
