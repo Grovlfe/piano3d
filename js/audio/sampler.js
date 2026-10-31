@@ -131,19 +131,17 @@ export class Sampler {
         this.packData = null;
       }
       if (this.cb.onStatus) this.cb.onStatus('默认音源 VSL Steinway D-274（来自你提供的 SF2）已就绪');
-      // Preload the whole keyboard's softest layer (88 samples) in parallel,
-      // plus every layer of the middle octaves — so the first note you play is
-      // already cached (no first-strike dropouts on slow connections).
+      // PRELOAD EVERYTHING: all 88 keys × all velocity layers are fetched and
+      // decoded into RUNNING MEMORY up front — the very first strike of ANY
+      // key at ANY strength is already cached (zero first-note dropouts, no
+      // mid-play decode stalls). Memory is released when the page closes.
       const preNotes = [];
       for (let n = 21; n <= 108; n++) preNotes.push(n);
       const preLayers = [];
       for (const n of preNotes) {
         const layers = this.pack.notes[String(n)];
         if (!layers) continue;
-        for (const l of layers) {
-          if (l.velLo <= 20) preLayers.push(l.f);      // softest layer, every key
-          else if (n >= 40 && n <= 88) preLayers.push(l.f); // all layers, middle
-        }
+        for (const l of layers) preLayers.push(l.f);   // ALL layers, ALL keys
       }
       let done = 0;
       const BATCH = 8;
