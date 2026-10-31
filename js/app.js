@@ -1,7 +1,7 @@
 // app.js — 主入口：UI、3D 场景、音频引擎、MIDI 设备/文件、电脑键盘、导入、自检
 window.__appVersion = 6;
 import { PianoScene } from './scene.js?v=86';
-import { Sampler } from './audio/sampler.js?v=67';
+import { Sampler } from './audio/sampler.js?v=68';
 import { MidiDevice } from './midi/device.js?v=57';
 import { MidiPlayer } from './midi/player.js?v=58';
 import { parseMidi } from './midi/parse.js?v=56';
@@ -161,6 +161,7 @@ function _savePrefs() {
     backdrop: state.backdrop || '',
     fov: ($('fov') ? $('fov').value : 42),
     viewMode: ($('viewMode') ? $('viewMode').value : 'seated'),
+    preloadPack: ($('preloadPack') ? ($('preloadPack').checked ? '1' : '0') : '1'),
   };
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (e) { /* storage unavailable */ }
   // cloud mirror: the URL itself carries the settings — open this link on any
@@ -196,6 +197,7 @@ function _loadPrefs() {
   }
   set('fxContrast', p.fxContrast); set('fxBright', p.fxBright);
   set('fxSat', p.fxSat); set('fxBloom', p.fxBloom);
+  if ($('preloadPack') && p.preloadPack !== undefined) $('preloadPack').checked = p.preloadPack !== '0';
   if (p.octave !== undefined) state.octave = Math.max(-2, Math.min(2, +p.octave || 0));
   if (p.transpose !== undefined) state.transpose = Math.max(-12, Math.min(12, Math.round(+p.transpose) || 0));
   // light preset + backdrop restore (light only; camera restored from saved sliders)
@@ -255,10 +257,14 @@ function _tp() {
 
 // ---------- init ----------
 async function init() {
-  // default soundfont pack
-  await engine.loadDefaultPack('soundfont/default/manifest.json', (p) => {
-    $('sfbarFill').style.width = Math.round(p * 100) + '%';
-  });
+  // default soundfont pack — autoload unless the user disabled 启动预载音源
+  let _preload = true;
+  try { _preload = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}').preloadPack !== '0'; } catch (e) {}
+  if (_preload) {
+    await engine.loadDefaultPack('soundfont/default/manifest.json', (p) => {
+      $('sfbarFill').style.width = Math.round(p * 100) + '%';
+    });
+  }
   state.sfReady = true;
   $('stSf').textContent = engine.mode === 'pack' ? 'VSL D-274' : '内置合成器';
   $('dotSf').className = engine.mode === 'pack' ? 'dot on' : 'dot warn';
@@ -332,6 +338,8 @@ function _wireUI() {
     }
     _savePrefs();
   });
+
+  if ($('preloadPack')) $('preloadPack').addEventListener('change', () => { _savePrefs(); toast('音源预载已' + ($('preloadPack').checked ? '开启：下次启动自动预载' : '关闭'), 'ok'); });
 
   // audio controls
   $('vol').addEventListener('input', (e) => { engine.setVolume(e.target.value / 100); _savePrefs(); });
