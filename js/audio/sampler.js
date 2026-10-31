@@ -47,7 +47,7 @@ export class Sampler {
     this.comp.knee.value = 18;
     this.comp.ratio.value = 5;
     this.comp.attack.value = 0.002;
-    this.comp.release.value = 0.22;
+    this.comp.release.value = 0.12;
     this.master.connect(this.comp);
     this.comp.connect(this.ctx.destination);
 
@@ -194,13 +194,17 @@ export class Sampler {
     const n = this._trans(note);
     if (n < NOTE0 || n > NOTE1) return;
     vel = Math.max(1, Math.min(127, Math.round(vel)));
-    // velocity curve (concert-grand feel: soft is feather-light, forte has punch)
+    // velocity curve — STANDARD response by default (soft is audible, forte is
+    // strong but never clipped): near-linear with a gentle floor lift. Curves 2/3
+    // are alternative expressive profiles selectable in settings.
     let g = vel / 127;
-    if (this.velCurve === 1) g = Math.pow(g, 1.65);
-    else if (this.velCurve === 2) g = Math.pow(g, 0.75);
-    // D-274 character: low keys need more arm, high keys are naturally louder
+    if (this.velCurve === 1) g = 0.18 + 0.82 * g;
+    else if (this.velCurve === 2) g = Math.pow(g, 0.9);
+    else if (this.velCurve === 3) g = Math.pow(g, 1.65);
+    // D-274 character: low keys fuller (never weak), high keys naturally
+    // present but not piercing
     const nf = Math.min(1, Math.max(0, (n - NOTE0) / (NOTE1 - NOTE0)));
-    g *= 0.72 + 0.5 * nf;
+    g *= 0.80 + 0.35 * nf;
 
     if (this.recordSink) this.recordSink(n, vel, true);
 
@@ -241,7 +245,7 @@ export class Sampler {
       use = [best];
     }
     if (use.length > 2) use = [use[0], use[use.length - 1]];
-    const pan = (note - NOTE0) / (NOTE1 - NOTE0) * 1.5 - 0.75 + (Math.random() * 0.05 - 0.025);
+    const pan = (note - NOTE0) / (NOTE1 - NOTE0) * 1.7 - 0.85 + (Math.random() * 0.06 - 0.03);
     for (const l of use) {
       const rate = l.rate || this.ctx.sampleRate;
       this._spawnVoice(note, l.buffer, l, vel, gVel, pan, opts, now, rate);
@@ -276,7 +280,7 @@ export class Sampler {
 
     // wide, natural stereo field: low keys left, high keys right (player view),
     // plus a tiny per-note randomization so chords bloom instead of pin-pointing
-    const pan = (note - NOTE0) / (NOTE1 - NOTE0) * 1.5 - 0.75 + (Math.random() * 0.05 - 0.025);
+    const pan = (note - NOTE0) / (NOTE1 - NOTE0) * 1.7 - 0.85 + (Math.random() * 0.06 - 0.03);
 
     const bufs = await Promise.all(use.map(l => this._getBuffer(l.f).catch(() => null)));
     if (this._dead) return;
@@ -378,7 +382,7 @@ export class Sampler {
       g.connect(panner);
       panner.connect(this.dry);
       const rg = ctx.createGain();
-      rg.gain.value = 0.9;
+      rg.gain.value = 0.95;
       panner.connect(rg);
       rg.connect(this.reverb);
     } else {
@@ -500,13 +504,14 @@ export class Sampler {
   }
 
   // damper fall time (seconds) modelled after an acoustic grand:
-  // lower notes have longer damped tails, higher notes stop almost instantly.
+  // lower notes have slightly longer damped tails, higher notes stop almost
+  // instantly — a Steinway D-274 damper kills the string FAST (50–320 ms).
   _damperTime(note, vel) {
     const freq = 27.5 * Math.pow(2, (note - NOTE0) / 12);
-    let t = 0.09 + 900 / freq * 0.28;   // C2 ~0.88s, C4 ~0.35s, C6 ~0.13s
-    t = Math.max(0.09, Math.min(0.9, t));
+    let t = 0.055 + 16 / freq;   // C2 ~0.30s, C4 ~0.12s, C6 ~0.07s
+    t = Math.max(0.045, Math.min(0.32, t));
     const vn = Math.max(0, Math.min(1, (vel - 1) / 126));
-    return t * (0.8 + 0.5 * vn);
+    return t * (0.78 + 0.22 * vn);
   }
 
   _killVoice(v, now) {
@@ -532,7 +537,7 @@ export class Sampler {
       // exponential damping — acoustic dampers decay, they don't linearly cut.
       // tau = sec/5.5 reaches -60dB near the stop time while the audible front
       // (the damper contact) falls off fast, matching a real grand's damper.
-      v.g.gain.setTargetAtTime(0.0001, now, Math.max(0.015, sec / 5.5));
+      v.g.gain.setTargetAtTime(0.0001, now, Math.max(0.012, sec / 4.2));
       v.source.stop(now + sec + 0.12);
     } catch (e) {}
     v.releaseT = now + sec;
@@ -599,8 +604,9 @@ export class Sampler {
         for (const v of [...set]) {
           if (v.sustained && !this.sostenutoNotes.has(v.note)) {
             // pedal lift: dampers fall together but each string decays at its
-            // own rate (bass longer, treble quick) — smooth, never instant.
-            this._releaseVoice(v, now, Math.max(0.22, this._damperTime(v.note, v.vel) * 1.15));
+            // own rate (bass a touch longer, treble quick) — FAST release,
+            // like a real grand's pedal-up (never a hard click).
+            this._releaseVoice(v, now, Math.max(0.09, this._damperTime(v.note, v.vel)));
           }
         }
       }
