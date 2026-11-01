@@ -39,16 +39,20 @@ export class Sampler {
       if (this.cb.onError) this.cb.onError('无法创建 AudioContext：' + e.message);
       return;
     }
-    // master chain: master -> compressor -> dest
+    // master chain: master -> hp -> compressor -> dest
     this.master = this.ctx.createGain();
     this.master.gain.value = this.masterVol;
+    this.hp = this.ctx.createBiquadFilter();
+    this.hp.type = 'highpass';
+    this.hp.frequency.value = 27;
     this.comp = this.ctx.createDynamicsCompressor();
     this.comp.threshold.value = -14;
     this.comp.knee.value = 18;
     this.comp.ratio.value = 5;
     this.comp.attack.value = 0.002;
     this.comp.release.value = 0.12;
-    this.master.connect(this.comp);
+    this.master.connect(this.hp);
+    this.hp.connect(this.comp);
     this.comp.connect(this.ctx.destination);
 
     // reverb
@@ -65,19 +69,23 @@ export class Sampler {
 
   _makeImpulse(seconds, decay) {
     const rate = this.ctx.sampleRate;
-    const len = Math.floor(rate * seconds);
+    const pre = Math.floor(0.030 * rate);          // 30ms pre-delay: concert-hall depth
+    const len = Math.floor(rate * seconds) + pre;
     const buf = this.ctx.createBuffer(2, len, rate);
     for (let ch = 0; ch < 2; ch++) {
       const data = buf.getChannelData(ch);
-      for (let i = 0; i < len; i++) {
-        const t = i / len;
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+      // sparse decaying reflections (concert grand on stage): the tail is not
+      // uniform noise — it thins out with time like real hall acoustics
+      for (let i = pre; i < len; i++) {
+        const t = (i - pre) / (len - pre);
+        data[i] = (Math.random() < 0.35 ? (Math.random() * 2 - 1) : 0)
+                  * Math.pow(1 - t, decay) * (0.5 + 0.5 * Math.pow(1 - t, 1.5));
       }
-      // early reflections
-      const early = [0.004, 0.009, 0.017, 0.028, 0.043];
+      // early reflections: stage floor, lid, side walls, back wall (ms)
+      const early = [0.035, 0.041, 0.049, 0.058, 0.068, 0.079, 0.092, 0.110];
       for (const d of early) {
-        const idx = Math.floor(d * rate);
-        if (idx < len) data[idx] += (Math.random() * 2 - 1) * 0.18;
+        const idx = pre + Math.floor(d * rate);
+        if (idx < len) data[idx] += (Math.random() * 2 - 1) * 0.16;
       }
     }
     return buf;
@@ -177,11 +185,30 @@ export class Sampler {
         ab = await resp.arrayBuffer();
       }
       const buf = await this.ctx.decodeAudioData(ab);
+      // measure true loudness (RMS) of this sample right after decode — the
+      // raw VSL samples differ in level across keys, so playback normalises
+      // every key to its velocity layer's target level (bass/mid/treble then
+      // come out balanced at the SAME MIDI velocity, like a real D-274).
+      buf._rms = this._rmsOf(buf);
       this.cache.set(file, buf);
       return buf;
     })();
     this.loading.set(file, p);
     try { return await p; } finally { this.loading.delete(file); }
+  }
+
+  // RMS of a decoded stereo buffer (4-sample stride: ~fast, error <0.3dB)
+  _rmsOf(buf) {
+    try {
+      const L = buf.getChannelData(0), R = buf.getChannelData(1);
+      const n = L.length;
+      let s = 0, c = 0;
+      for (let i = 0; i < n; i += 4) {
+        s += L[i] * L[i] + R[i] * R[i];
+        c += 2;
+      }
+      return Math.sqrt(s / Math.max(1, c));
+    } catch (e) { return 0; }
   }
 
   _layerKey(note) {
@@ -202,10 +229,11 @@ export class Sampler {
     if (this.velCurve === 1) g = 0.55 + 0.45 * g;
     else if (this.velCurve === 2) g = 0.50 + 0.50 * Math.pow(g, 0.9);
     else if (this.velCurve === 3) g = 0.50 + 0.50 * Math.pow(g, 1.65);
-    // D-274 character: low keys fuller (never weak), high keys naturally
-    // present but not piercing
+    // D-274 character: after RMS balance a TINY register tilt remains — bass a
+    // touch fuller (long strings radiate more), treble kept in check (short
+    // strings are naturally bright) — within ±3%, never the old ±20% swing.
     const nf = Math.min(1, Math.max(0, (n - NOTE0) / (NOTE1 - NOTE0)));
-    g *= 0.80 + 0.35 * nf;
+    g *= 0.965 + 0.07 * nf;
 
     if (this.recordSink) this.recordSink(n, vel, true);
 
@@ -342,6 +370,16 @@ export class Sampler {
     if (opts.w) peak *= Math.sqrt(opts.w);   // equal-power crossfade weight
     if (l.atten) peak *= Math.pow(10, -(l.atten) / 200);
     if (this.soft) peak *= 0.48;
+    // LOUDNESS BALANCE: normalise this sample to its velocity layer's target
+    // level, so the SAME MIDI velocity sounds consistent across the whole
+    // keyboard (bass no longer quieter, treble no longer louder). Each layer
+    // has its own target that rises pp -> ff, preserving real piano dynamics.
+    const rms = buf._rms || 0;
+    if (rms > 0.0005) {
+      const vi = Math.max(0, Math.min(7, Math.floor(((l.velLo || 0) + (l.velHi || 127)) / 2 / 16)));
+      const target = 0.05 * Math.pow(1.35, vi);
+      peak *= Math.min(4.0, Math.max(0.35, target / rms));
+    }
     // Steinway D-274 dynamics: the sample layers already carry the natural
     // loudness of each strike, so the extra digital scaling stays GENTLE —
     // soft notes stay round and quiet, forte gains body without clipping.
