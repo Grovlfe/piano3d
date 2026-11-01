@@ -380,6 +380,14 @@ export class Sampler {
       const target = 0.05 * Math.pow(1.35, vi);
       peak *= Math.min(4.0, Math.max(0.35, target / rms));
     }
+    // PERCEPTUAL LOUDNESS CONTOUR: after physical RMS balance the deepest
+    // bass still FEELS weak and the top treble FEELS loud, because human
+    // hearing is far less sensitive to 27 Hz than to 4 kHz at the same level.
+    // A gentle ISO-226-style tilt makes A0 and C8 sound EQUAL in perceived
+    // size at the same MIDI velocity, like sitting at a real D-274.
+    const pf = Math.min(1, Math.max(0, (note - NOTE0) / (NOTE1 - NOTE0)));
+    const contour = 1.30 - 0.40 * pf;   // bass +30% .. treble -10%, smooth
+    peak *= contour;
     // Steinway D-274 dynamics: the sample layers already carry the natural
     // loudness of each strike, so the extra digital scaling stays GENTLE —
     // soft notes stay round and quiet, forte gains body without clipping.
