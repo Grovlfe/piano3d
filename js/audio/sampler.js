@@ -1,4 +1,5 @@
 // sampler.js — 基于样本的钢琴音频引擎：力度0-127、延音/持续/柔音踏板、混响、立体声、防爆音
+// v75 · perceptual loudness contour · 2026-11-01
 import { Synth } from './synth.js';
 
 const NOTE0 = 21, NOTE1 = 108;
